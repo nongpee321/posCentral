@@ -2090,6 +2090,8 @@ class MainWindow(QMainWindow):
 
             cached_offline_auth=self.config.get('offline_auth'),
 
+            default_cashier_code=self.config.get('cashier_username') or self.config.get('cashier_code', ''),
+
         )
 
         if dialog.exec() == QDialog.Accepted:

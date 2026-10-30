@@ -8,15 +8,18 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 
 class CashierLoginDialog(QDialog):
-    def __init__(self, parent=None, api_url="", pos_token="", cached_offline_auth=None):
+    def __init__(self, parent=None, api_url="", pos_token="", cached_offline_auth=None, default_cashier_code=""):
         super().__init__(parent)
         self.api_url = api_url.rstrip("/")
         self.pos_token = pos_token
         self.selected_cashier = None
         self.offline_auth = cached_offline_auth if isinstance(cached_offline_auth, dict) else None
+        self.default_cashier_code = default_cashier_code
+        self.entered_pin = ""
+        self.is_offline_login = False
         
         self.setWindowTitle("เข้าสู่ระบบแคชเชียร์")
-        self.setFixedSize(400, 350)
+        self.setFixedSize(400, 360)
         self.setStyleSheet("background-color: white; color: #111827; font-family: 'Segoe UI', sans-serif;")
         
         self.init_ui()
@@ -32,21 +35,25 @@ class CashierLoginDialog(QDialog):
         layout.addWidget(title)
         
         lbl_cashier = QLabel("ชื่อผู้ใช้ / รหัสพนักงาน:")
-        lbl_cashier.setStyleSheet("font-weight: bold;")
+        lbl_cashier.setStyleSheet("font-weight: bold; font-size: 14px; color: #1e293b;")
         layout.addWidget(lbl_cashier)
         
         self.code_input = QLineEdit()
-        self.code_input.setStyleSheet("padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 16px;")
+        self.code_input.setPlaceholderText("ชื่อผู้ใช้ หรือรหัสพนักงาน")
+        self.code_input.setStyleSheet("padding: 10px; border: 1.5px solid #cbd5e1; border-radius: 6px; font-size: 15px;")
+        if self.default_cashier_code:
+            self.code_input.setText(self.default_cashier_code)
         layout.addWidget(self.code_input)
-        self.code_input.returnPressed.connect(self.do_login)
+        self.code_input.returnPressed.connect(self._on_code_enter)
         
-        lbl_pin = QLabel("รหัสผ่าน (ERP):")
-        lbl_pin.setStyleSheet("font-weight: bold;")
+        lbl_pin = QLabel("รหัส PIN:")
+        lbl_pin.setStyleSheet("font-weight: bold; font-size: 14px; color: #1e293b;")
         layout.addWidget(lbl_pin)
         
         self.pin_input = QLineEdit()
+        self.pin_input.setPlaceholderText("ใส่รหัส PIN เช่น 1234 หรือ 0000")
         self.pin_input.setEchoMode(QLineEdit.Password)
-        self.pin_input.setStyleSheet("padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 16px;")
+        self.pin_input.setStyleSheet("padding: 10px; border: 1.5px solid #cbd5e1; border-radius: 6px; font-size: 15px;")
         layout.addWidget(self.pin_input)
         self.pin_input.returnPressed.connect(self.do_login)
         
@@ -54,7 +61,7 @@ class CashierLoginDialog(QDialog):
         
         btn_layout = QHBoxLayout()
         cancel_btn = QPushButton("ยกเลิก")
-        cancel_btn.setStyleSheet("background: #f1f5f9; padding: 10px; border-radius: 6px;")
+        cancel_btn.setStyleSheet("background: #f1f5f9; padding: 10px; border-radius: 6px; font-weight: bold;")
         cancel_btn.clicked.connect(self.reject)
         
         self.login_btn = QPushButton("เข้าสู่ระบบ")
@@ -64,27 +71,42 @@ class CashierLoginDialog(QDialog):
         btn_layout.addWidget(cancel_btn)
         btn_layout.addWidget(self.login_btn)
         layout.addLayout(btn_layout)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self.code_input.text().strip():
+            self.pin_input.setFocus()
+            self.pin_input.selectAll()
+        else:
+            self.code_input.setFocus()
+
+    def _on_code_enter(self):
+        if not self.pin_input.text().strip():
+            self.pin_input.setFocus()
+        else:
+            self.do_login()
             
     def do_login(self):
-        code = self.code_input.text().strip()
-        if not code:
-            QMessageBox.warning(self, "แจ้งเตือน", "กรุณาระบุชื่อผู้ใช้")
-            return
-            
         pin = self.pin_input.text().strip()
         if not pin:
-            QMessageBox.warning(self, "แจ้งเตือน", "กรุณาระบุรหัสผ่าน")
+            QMessageBox.warning(self, "แจ้งเตือน", "กรุณาระบุรหัส PIN")
+            self.pin_input.setFocus()
             return
+
+        code = self.code_input.text().strip()
             
         self.login_btn.setText("กำลังเข้าสู่ระบบ...")
         self.login_btn.setEnabled(False)
         self.repaint() # update UI immediately
             
         try:
+            payload = {'pin': pin}
+            if code:
+                payload['code'] = code
             res = requests.post(
                 f"{self.api_url}/api/pos/cashier/login",
                 headers={'Authorization': f"Bearer {self.pos_token}", 'Accept': 'application/json'},
-                json={'code': code, 'pin': pin},
+                json=payload,
                 timeout=5
             )
             res.encoding = 'utf-8'
@@ -93,22 +115,22 @@ class CashierLoginDialog(QDialog):
             elif res.status_code in (200, 422, 401, 404):
                 try:
                     data = res.json()
-                except:
+                except Exception:
                     data = {}
                 if res.status_code == 200 and data.get('success'):
                     self.selected_cashier = data.get('cashier', {})
-                    if 'code' not in self.selected_cashier:
+                    if 'code' not in self.selected_cashier and code:
                         self.selected_cashier['code'] = code
                     offline_credential = data.get('offline_credential')
                     self.offline_auth = {
-                        'code': code,
+                        'code': code or self.selected_cashier.get('code', ''),
                         'cashier': self.selected_cashier,
                         'credential': offline_credential,
                     } if isinstance(offline_credential, dict) else None
                     self.entered_pin = pin
                     self.accept()
                 else:
-                    QMessageBox.warning(self, "Login Failed", data.get('message', 'เข้าสู่ระบบล้มเหลว (ตรวจสอบรหัสผ่าน)'))
+                    QMessageBox.warning(self, "เข้าสู่ระบบไม่สำเร็จ", data.get('message', 'เข้าสู่ระบบล้มเหลว (ตรวจสอบรหัส PIN)'))
             else:
                 QMessageBox.warning(self, "Error", f"เกิดข้อผิดพลาดจากเซิร์ฟเวอร์ (รหัส {res.status_code})")
 
@@ -134,7 +156,7 @@ class CashierLoginDialog(QDialog):
                 QMessageBox.warning(
                     self,
                     "เข้าสู่ระบบออฟไลน์ไม่ได้",
-                    "ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้ และไม่มีข้อมูลยืนยันออฟไลน์ที่ใช้ได้สำหรับบัญชีนี้หรือ PIN ไม่ถูกต้อง",
+                    "ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้ และไม่มีข้อมูลยืนยันออฟไลน์ที่ใช้ได้สำหรับบัญชีนี้หรือรหัส PIN ไม่ถูกต้อง",
                 )
 
         finally:
