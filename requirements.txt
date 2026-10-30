@@ -1,0 +1,8 @@
+PySide6
+requests==2.32.3
+SQLAlchemy==2.0.31
+python-dotenv==1.0.1
+qrcode
+Pillow
+python-escpos
+python-barcode

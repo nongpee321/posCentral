@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing & Cache
+.pytest_cache/
+.coverage
+htmlcov/
+test_out.txt
+
+# PyInstaller / Build
+build/
+dist/
+build-history/
+*.spec
+*.log
+sync_error.log
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini
+
+# Local SQLite databases (active user data in runtime)
+pos_offline.db
+pos.db-shm
+pos.db-wal
