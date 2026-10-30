@@ -905,6 +905,16 @@ class SyncWorker(QThread):
                         entry.payload_json = json.dumps(payload)
                         session.commit()
 
+                    # Auto-heal discount fields if retrying an existing pending/failed outbox entry
+                    if 'discount_amount' in payload and 'manual_discount_amount' not in payload:
+                        payload['manual_discount_amount'] = payload['discount_amount']
+                        entry.payload_json = json.dumps(payload)
+                        session.commit()
+                    elif 'manual_discount_amount' in payload and 'discount_amount' not in payload:
+                        payload['discount_amount'] = payload['manual_discount_amount']
+                        entry.payload_json = json.dumps(payload)
+                        session.commit()
+
                     # If already prepared but missing transfer validation fields, fix them
                     if payload.get('method') in ('transfer', 'mixed'):
                         payload['payment_confirmed'] = True

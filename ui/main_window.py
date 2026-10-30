@@ -1728,7 +1728,7 @@ class MainWindow(QMainWindow):
 
         
 
-        version_label = QLabel("v1.2.12")
+        version_label = QLabel("v1.2.13")
 
         version_label.setStyleSheet("font-size: 13px; color: #64748b; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 8px;")
 
@@ -4437,6 +4437,8 @@ class MainWindow(QMainWindow):
                 "customer_address": cust_addr,
 
                 "discount_amount": discount_applied,
+
+                "manual_discount_amount": discount_applied,
 
                 "items": api_items
 
