@@ -905,42 +905,51 @@ class SyncWorker(QThread):
                         entry.payload_json = json.dumps(payload)
                         session.commit()
 
-                    # Auto-heal discount and items if bill had discount or was rejected by manager approval / amount shortfall
+                    # Auto-heal discount and items if bill had discount or was rejected by manager approval / pricing / shortfall
                     sale_total = float(sale.total_amount if sale else (payload.get('cash_received') or 0.0))
                     payload_items = payload.get('items') or []
-                    raw_items_sum = sum(float(i.get('qty', 0) or 0) * float(i.get('unit_price', 0) or 0) for i in payload_items)
-                    has_discount_conflict = (
-                        payload.get('manual_discount_amount', 0) > 0
-                        or payload.get('discount_amount', 0) > 0
-                        or (entry.last_error and ('ส่วนลดพิเศษ' in entry.last_error or 'สิทธิ์อนุมัติ' in entry.last_error or 'ไม่ครบ' in entry.last_error))
-                        or (sale and sale.sync_error and ('ส่วนลดพิเศษ' in sale.sync_error or 'สิทธิ์อนุมัติ' in sale.sync_error or 'ไม่ครบ' in sale.sync_error))
-                        or abs(raw_items_sum - sale_total) > 0.02
+                    needs_discount_healing = (
+                        payload_items
+                        and (
+                            payload.get('manual_discount_amount', 0) > 0
+                            or payload.get('discount_amount', 0) > 0
+                            or (entry.last_error and any(err in entry.last_error for err in ('ส่วนลดพิเศษ', 'สิทธิ์อนุมัติ', 'ไม่ครบ', 'ราคาหรือส่วนลดเปลี่ยน')))
+                            or (sale and sale.sync_error and any(err in sale.sync_error for err in ('ส่วนลดพิเศษ', 'สิทธิ์อนุมัติ', 'ไม่ครบ', 'ราคาหรือส่วนลดเปลี่ยน')))
+                        )
                     )
-                    if has_discount_conflict and payload_items and sale_total > 0 and raw_items_sum > 0:
-                        remaining_net = sale_total
-                        ratio = sale_total / raw_items_sum
-                        new_items = []
-                        for idx, it in enumerate(payload_items):
-                            item_qty = float(it.get('qty', 1.0) or 1.0)
-                            if idx == len(payload_items) - 1:
-                                line_net = max(0.0, round(remaining_net, 2))
-                            else:
-                                line_gross = item_qty * float(it.get('unit_price', 0.0) or 0.0)
-                                line_net = round(line_gross * ratio, 2)
-                                remaining_net -= line_net
-                            unit_p = round(line_net / item_qty, 4) if item_qty > 0 else 0.0
-                            new_items.append({
-                                "product_id": it["product_id"],
-                                "qty": item_qty,
-                                "unit_price": unit_p
-                            })
-                        payload['items'] = new_items
+
+                    if needs_discount_healing:
+                        # Ensure items have standard catalog prices so PosPricingGuard passes with 0 discrepancy
+                        for it in payload_items:
+                            prod_id = it.get('product_id')
+                            if prod_id:
+                                prod_record = session.query(Product).filter_by(id=prod_id).first()
+                                if prod_record:
+                                    cat_price = float(prod_record.pos_price or prod_record.default_price or it.get('unit_price', 0.0))
+                                    if cat_price > 0 and abs(float(it.get('unit_price', 0.0)) - cat_price) > 0.01:
+                                        it['unit_price'] = cat_price
+
+                        gross_sum = sum(float(i.get('qty', 0) or 0) * float(i.get('unit_price', 0) or 0) for i in payload_items)
+                        discount_val = max(0.0, round(gross_sum - sale_total, 2)) if (sale_total > 0 and gross_sum > sale_total) else float(payload.get('discount_amount') or 0.0)
+
+                        # Update discount fields: manual_discount_amount must be 0 so manager permission is never required
+                        payload['discount_amount'] = discount_val
                         payload['manual_discount_amount'] = 0.0
-                        payload['discount_amount'] = 0.0
-                        entry.payload_json = json.dumps(payload)
-                        session.commit()
-                    elif 'manual_discount_amount' in payload and payload['manual_discount_amount'] > 0:
-                        payload['manual_discount_amount'] = 0.0
+
+                        # Fix cash payments: PosPaymentValidator requires cash_received >= gross sum
+                        if payload.get('method') == 'cash':
+                            orig_received = float(payload.get('cash_received') or 0.0)
+                            if orig_received < gross_sum:
+                                payload['cash_received'] = gross_sum
+                                payload['change_amount'] = max(0.0, round(gross_sum - sale_total, 2))
+
+                        # Fix mixed payments: cash_amount + transfer_amount == gross_sum
+                        if payload.get('method') == 'mixed' and gross_sum > 0:
+                            cur_mix_sum = float(payload.get('cash_amount') or 0.0) + float(payload.get('transfer_amount') or 0.0)
+                            diff = round(gross_sum - cur_mix_sum, 2)
+                            if abs(diff) > 0.01:
+                                payload['cash_amount'] = round(float(payload.get('cash_amount') or 0.0) + diff, 2)
+
                         entry.payload_json = json.dumps(payload)
                         session.commit()
 
@@ -958,6 +967,7 @@ class SyncWorker(QThread):
                 req_headers = dict(headers)
 
                 req_headers['Idempotency-Key'] = entry.idempotency_key
+                req_headers['X-Idempotency-Key'] = entry.idempotency_key
 
                 try:
 

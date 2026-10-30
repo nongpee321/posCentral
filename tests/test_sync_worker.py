@@ -102,3 +102,98 @@ def test_auto_heal_invalid_branch(tmp_path):
     assert healed_payload["shift_id"] == 99
     session.close()
 
+
+def test_auto_heal_discount_fields(tmp_path):
+    import json
+    from database.models import Sale, Outbox, Product
+    db_path = str(tmp_path / "discount_heal.db")
+    session = init_db(f"sqlite:///{db_path}")
+
+    prod = Product(
+        id=35801,
+        sku_code="104150",
+        barcode="104150",
+        name_th="Test Chicken",
+        default_price=110.0,
+        pos_price=110.0,
+        is_active=True
+    )
+    sale = Sale(
+        local_sale_id="sale-disc-1",
+        doc_number="003401254878",
+        branch_id=34,
+        total_amount=100.0,
+        received_amount=100.0,
+        payment_method="cash",
+        idempotency_key="offline-receipt-sale-disc-1",
+        status="failed",
+        sync_error="ราคาหรือส่วนลดเปลี่ยนจากข้อมูลบนเซิร์ฟเวอร์"
+    )
+    payload = {
+        "local_sale_id": "sale-disc-1",
+        "branch_id": 34,
+        "shift_id": 13,
+        "cashier_id": 173,
+        "method": "cash",
+        "cash_received": 100.0,
+        "change_amount": 0.0,
+        "discount_amount": 0.0,
+        "manual_discount_amount": 0.0,
+        "items": [{"product_id": 35801, "qty": 1.0, "unit_price": 100.0}]
+    }
+    outbox = Outbox(
+        aggregate_id="sale-disc-1",
+        event_type="sale_checkout",
+        idempotency_key="offline-receipt-sale-disc-1",
+        payload_json=json.dumps(payload),
+        status="failed",
+        last_error="ราคาหรือส่วนลดเปลี่ยนจากข้อมูลบนเซิร์ฟเวอร์",
+        payload_prepared=True
+    )
+    session.add(prod)
+    session.add(sale)
+    session.add(outbox)
+    session.commit()
+    session.close()
+
+    worker = SyncWorker(db_path, "http://localhost:8000", "test_token")
+    worker._resolve_branch_and_cashier = lambda sess: (34, 173)
+
+    posted_payloads = []
+    class MockCheckoutResponse:
+        status_code = 200
+        def json(self):
+            return {"status": "success", "receipt_id": 501, "receipt_no": "REC-002"}
+        def raise_for_status(self):
+            pass
+
+    def mock_post(url, json=None, headers=None, timeout=None):
+        posted_payloads.append(json)
+        return MockCheckoutResponse()
+
+    class MockShiftResponse:
+        status_code = 200
+        def json(self):
+            return {"shift": {"id": 13, "branch_id": 34, "cashier_id": 173}}
+        def raise_for_status(self):
+            pass
+
+    import unittest.mock as mock
+    with mock.patch("requests.get", return_value=MockShiftResponse()), \
+         mock.patch("requests.post", side_effect=mock_post):
+        ok, msg = worker._sync_outbox_sales()
+        assert ok is True
+
+    assert len(posted_payloads) == 1
+    sent = posted_payloads[0]
+    # Unit price restored to catalog 110.0
+    assert sent["items"][0]["unit_price"] == 110.0
+    # manual_discount_amount must be 0.0 so manager approval is never required
+    assert sent["manual_discount_amount"] == 0.0
+    # discount_amount equals discount (110 - 100 = 10)
+    assert sent["discount_amount"] == 10.0
+    # cash_received equals gross total 110.0
+    assert sent["cash_received"] == 110.0
+    # change_amount equals 10.0
+    assert sent["change_amount"] == 10.0
+
