@@ -1,4 +1,4 @@
-# PopCentral POS (v1.2.9)
+# PopCentral POS (v1.2.10)
 
 ระบบจุดขายหน้าร้านระดับพาณิชย์ (Commercial Desktop POS) พัฒนาด้วย **Python (PySide6 / Qt6)** และ **SQLAlchemy (SQLite)** ออกแบบตามสถาปัตยกรรม **Local-First & Offline-First** สามารถเปิดบิล ขายสินค้า ชั่งน้ำหนัก พิมพ์ใบเสร็จ และรับชำระเงินได้ตลอดเวลาแม้ไม่มีสัญญาณอินเทอร์เน็ต พร้อมระบบ Background Sync อัตโนมัติที่เชื่อมต่อกับ **PopStar ERP Backend**
 
@@ -90,7 +90,7 @@ python main.py
 
 ### วิธีที่ 2: ติดตั้งผ่านไฟล์ Installer (.exe) สำหรับใช้งานหน้าร้าน
 
-1. รันไฟล์ติดตั้ง `PopCentral-POS-UAT-1.2.9-setup.exe`
+1. รันไฟล์ติดตั้ง `PopCentral-POS-UAT-1.2.10-setup.exe`
 2. เลือกโฟลเดอร์ปลายทางที่ต้องการติดตั้ง (เช่น `C:\PopCentral POS`)
 3. ตัวติดตั้งจะทำการแยกไฟล์และสร้าง Shortcut บนเดสก์ท็อปให้อัตโนมัติ
 4. ดับเบิลคลิกที่ไอคอน `PopCentral POS` เพื่อเริ่มใช้งาน
@@ -136,9 +136,9 @@ run_tests.bat
 
 ### คำสั่ง Build:
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\build_pos.ps1 -Version "1.2.9"
+powershell -ExecutionPolicy Bypass -File .\build_pos.ps1 -Version "1.2.10"
 ```
-ไฟล์ติดตั้งสำเร็จรูปจะถูกสร้างไว้ที่โฟลเดอร์ `dist\PopCentral-POS-UAT-1.2.9-setup.exe`
+ไฟล์ติดตั้งสำเร็จรูปจะถูกสร้างไว้ที่โฟลเดอร์ `dist\PopCentral-POS-UAT-1.2.10-setup.exe`
 
 ---
 

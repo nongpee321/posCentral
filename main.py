@@ -47,6 +47,20 @@ def main():
                         dst_conn = sqlite3.connect(db_path)
                         src_conn.backup(dst_conn)
                         src_conn.close()
+
+                        # Ensure no leftover transactions exist in newly seeded database
+                        dst_cur = dst_conn.cursor()
+                        dst_cur.execute("DELETE FROM sales")
+                        dst_cur.execute("DELETE FROM sale_items")
+                        dst_cur.execute("DELETE FROM payments")
+                        dst_cur.execute("DELETE FROM outbox")
+                        dst_cur.execute("DELETE FROM sync_logs")
+                        dst_cur.execute("DELETE FROM shifts")
+                        try:
+                            dst_cur.execute("DELETE FROM cancelled_bills")
+                        except Exception:
+                            pass
+                        dst_conn.commit()
                         dst_conn.close()
                         print(f"[POS] Successfully pre-seeded database from {cand}")
                         session = init_db(f'sqlite:///{db_path}')
