@@ -130,12 +130,7 @@ class DiscountDialog(QDialog):
         in_row.addWidget(self.unit_lbl)
         input_layout.addLayout(in_row)
 
-        # Quick Buttons
-        self.quick_widget = QWidget()
-        self.quick_layout = QHBoxLayout(self.quick_widget)
-        self.quick_layout.setContentsMargins(0, 4, 0, 0)
-        self.quick_layout.setSpacing(6)
-        input_layout.addWidget(self.quick_widget)
+
 
         layout.addWidget(input_container)
         self.input_container = input_container
@@ -242,46 +237,15 @@ class DiscountDialog(QDialog):
             self.on_mode_changed(1)
 
     def on_mode_changed(self, mode_id):
-        # Clear quick buttons
-        while self.quick_layout.count():
-            item = self.quick_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-
-        btn_style = """
-            QPushButton {
-                background-color: #e0f2fe;
-                color: #0369a1;
-                font-size: 12.5px;
-                font-weight: 700;
-                border-radius: 4px;
-                padding: 5px 8px;
-                border: 1px solid #bae6fd;
-            }
-            QPushButton:hover {
-                background-color: #bae6fd;
-            }
-        """
-
         if mode_id == 1:  # Baht
             self.input_container.show()
             self.input_lbl.setText("ระบุจำนวนเงินส่วนลด (บาท):")
             self.unit_lbl.setText("บาท")
-            for amt in [10, 20, 50, 100, 200]:
-                btn = QPushButton(f"฿{amt}")
-                btn.setStyleSheet(btn_style)
-                btn.clicked.connect(lambda _, a=amt: self.val_input.setText(str(a)))
-                self.quick_layout.addWidget(btn)
             self.val_input.setFocus()
         elif mode_id == 2:  # Percentage
             self.input_container.show()
             self.input_lbl.setText("ระบุเปอร์เซ็นต์ส่วนลด (%):")
             self.unit_lbl.setText("%")
-            for pct in [5, 10, 15, 20, 50]:
-                btn = QPushButton(f"{pct}%")
-                btn.setStyleSheet(btn_style)
-                btn.clicked.connect(lambda _, p=pct: self.val_input.setText(str(p)))
-                self.quick_layout.addWidget(btn)
             self.val_input.setFocus()
         else:  # Clear
             self.input_container.hide()
