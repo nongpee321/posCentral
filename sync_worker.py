@@ -905,13 +905,42 @@ class SyncWorker(QThread):
                         entry.payload_json = json.dumps(payload)
                         session.commit()
 
-                    # Auto-heal discount fields if retrying an existing pending/failed outbox entry
-                    if 'discount_amount' in payload and 'manual_discount_amount' not in payload:
-                        payload['manual_discount_amount'] = payload['discount_amount']
+                    # Auto-heal discount and items if bill had discount or was rejected by manager approval / amount shortfall
+                    sale_total = float(sale.total_amount if sale else (payload.get('cash_received') or 0.0))
+                    payload_items = payload.get('items') or []
+                    raw_items_sum = sum(float(i.get('qty', 0) or 0) * float(i.get('unit_price', 0) or 0) for i in payload_items)
+                    has_discount_conflict = (
+                        payload.get('manual_discount_amount', 0) > 0
+                        or payload.get('discount_amount', 0) > 0
+                        or (entry.last_error and ('ส่วนลดพิเศษ' in entry.last_error or 'สิทธิ์อนุมัติ' in entry.last_error or 'ไม่ครบ' in entry.last_error))
+                        or (sale and sale.sync_error and ('ส่วนลดพิเศษ' in sale.sync_error or 'สิทธิ์อนุมัติ' in sale.sync_error or 'ไม่ครบ' in sale.sync_error))
+                        or abs(raw_items_sum - sale_total) > 0.02
+                    )
+                    if has_discount_conflict and payload_items and sale_total > 0 and raw_items_sum > 0:
+                        remaining_net = sale_total
+                        ratio = sale_total / raw_items_sum
+                        new_items = []
+                        for idx, it in enumerate(payload_items):
+                            item_qty = float(it.get('qty', 1.0) or 1.0)
+                            if idx == len(payload_items) - 1:
+                                line_net = max(0.0, round(remaining_net, 2))
+                            else:
+                                line_gross = item_qty * float(it.get('unit_price', 0.0) or 0.0)
+                                line_net = round(line_gross * ratio, 2)
+                                remaining_net -= line_net
+                            unit_p = round(line_net / item_qty, 4) if item_qty > 0 else 0.0
+                            new_items.append({
+                                "product_id": it["product_id"],
+                                "qty": item_qty,
+                                "unit_price": unit_p
+                            })
+                        payload['items'] = new_items
+                        payload['manual_discount_amount'] = 0.0
+                        payload['discount_amount'] = 0.0
                         entry.payload_json = json.dumps(payload)
                         session.commit()
-                    elif 'manual_discount_amount' in payload and 'discount_amount' not in payload:
-                        payload['discount_amount'] = payload['manual_discount_amount']
+                    elif 'manual_discount_amount' in payload and payload['manual_discount_amount'] > 0:
+                        payload['manual_discount_amount'] = 0.0
                         entry.payload_json = json.dumps(payload)
                         session.commit()
 

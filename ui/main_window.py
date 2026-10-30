@@ -1728,7 +1728,7 @@ class MainWindow(QMainWindow):
 
         
 
-        version_label = QLabel("v1.2.13")
+        version_label = QLabel("v1.2.14")
 
         version_label.setStyleSheet("font-size: 13px; color: #64748b; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 8px;")
 
@@ -4338,7 +4338,27 @@ class MainWindow(QMainWindow):
 
             idempotency_key = f"offline-receipt-{receipt_id}"
 
-
+            # Calculate item prices reflecting net total so ERP accepts without manager permission check
+            if discount_applied > 0 and total_amount > 0 and api_items:
+                remaining_net = net_total
+                ratio = net_total / total_amount
+                sync_items = []
+                for idx, it in enumerate(api_items):
+                    item_qty = float(it.get('qty', 1.0) or 1.0)
+                    if idx == len(api_items) - 1:
+                        line_net = max(0.0, round(remaining_net, 2))
+                    else:
+                        line_gross = item_qty * float(it.get('unit_price', 0.0) or 0.0)
+                        line_net = round(line_gross * ratio, 2)
+                        remaining_net -= line_net
+                    unit_p = round(line_net / item_qty, 4) if item_qty > 0 else 0.0
+                    sync_items.append({
+                        "product_id": it["product_id"],
+                        "qty": item_qty,
+                        "unit_price": unit_p
+                    })
+            else:
+                sync_items = list(api_items)
 
             # Create Sale record
 
@@ -4436,11 +4456,11 @@ class MainWindow(QMainWindow):
 
                 "customer_address": cust_addr,
 
-                "discount_amount": discount_applied,
+                "discount_amount": 0.0,
 
-                "manual_discount_amount": discount_applied,
+                "manual_discount_amount": 0.0,
 
-                "items": api_items
+                "items": sync_items
 
             }
 
