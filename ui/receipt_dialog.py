@@ -271,6 +271,12 @@ def print_escpos_receipt(printer_name, receipt_data, config):
     cmds = bytearray()
 
     cmds += INIT
+
+    # Auto-kick cash drawer on printing receipt for cash or split payment
+    pm_code = str(receipt_data.get('payment_method', '')).lower()
+    if pm_code in ['cash', 'split', 'mixed', 'เงินสด', 'ผสม (split)', 'ผสม'] or config.get('open_drawer_on_print', True):
+        cmds += get_drawer_kick_commands()
+
     cmds += FONT_SMALL
     
     cmds += ALIGN_CENTER
@@ -386,71 +392,50 @@ def print_escpos_receipt(printer_name, receipt_data, config):
 
         raise Exception(f"ไม่สามารถส่งข้อมูลไปที่เครื่องพิมพ์ '{printer_name}' ได้: {str(e)}")
 
+def get_drawer_kick_commands():
+    ESC = b'\x1b'
+    DLE = b'\x10'
+    cmds = bytearray()
+    cmds += ESC + b'@'                    # Initialize printer
+    cmds += ESC + b'p\x00\x19\xfa'        # Pin 2 standard ESC/POS pulse (50ms on / 500ms off)
+    cmds += ESC + b'p\x01\x19\xfa'        # Pin 5 standard ESC/POS pulse (50ms on / 500ms off)
+    cmds += ESC + b'p\x00\x32\x32'        # Pin 2 pulse variant (50ms on / 50ms off)
+    cmds += ESC + b'p\x01\x32\x32'        # Pin 5 pulse variant (50ms on / 50ms off)
+    cmds += DLE + b'\x14\x01\x00\x05'    # DLE DC4 real-time pulse (Pin 2)
+    cmds += DLE + b'\x14\x01\x01\x05'    # DLE DC4 real-time pulse (Pin 5)
+    cmds += b'\x07'                       # BEL (Star / generic pulse)
+    return bytes(cmds)
+
 def open_cash_drawer(printer_name):
-
     try:
-
         import win32print
-
     except ImportError:
-
         raise Exception("Cannot import win32print")
 
-        
-
     if not printer_name:
-
         raise Exception("No printer configured")
 
-        
-
-    ESC = b''
-
-    INIT = ESC + b'@'
-
-    OPEN_DRAWER_1 = ESC + b'p\x00\x19\xfa'
-
-    OPEN_DRAWER_2 = ESC + b'p\x01\x19\xfa'
-
-    
-
-    cmds = bytearray()
-
-    cmds += INIT
-    cmds += OPEN_DRAWER_1
-    cmds += OPEN_DRAWER_2
-
-    
+    cmds = get_drawer_kick_commands()
 
     try:
-
         hPrinter = win32print.OpenPrinter(printer_name)
-
         try:
-
-            win32print.StartDocPrinter(hPrinter, 1, ("OpenDrawer", None, "RAW"))
-
+            win32print.StartDocPrinter(hPrinter, 1, ("PopCentralPOS OpenDrawer", None, "RAW"))
             win32print.StartPagePrinter(hPrinter)
-
             win32print.WritePrinter(hPrinter, bytes(cmds))
-
             win32print.EndPagePrinter(hPrinter)
-
             win32print.EndDocPrinter(hPrinter)
-
         finally:
-
             win32print.ClosePrinter(hPrinter)
-
+        return True
     except Exception as e:
-
         raise Exception(f"Failed to open drawer: {str(e)}")
 
 class ReceiptSettingsDialog(QDialog):
     def __init__(self, parent=None, config=None, receipt_data=None):
         super().__init__(parent)
         self.setWindowTitle("ตั้งค่าเครื่องพิมพ์ใบเสร็จ")
-        self.setFixedSize(480, 360)
+        self.setFixedSize(540, 370)
         self.setStyleSheet("""
             QDialog {
                 background-color: #ffffff;
@@ -614,10 +599,33 @@ class ReceiptSettingsDialog(QDialog):
         """)
         save_btn.clicked.connect(lambda: self.save_settings(and_test=False))
 
+        drawer_test_btn = QPushButton("ทดสอบเปิดลิ้นชัก")
+        drawer_test_btn.setFixedHeight(42)
+        drawer_test_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #fff7ed; border: 1px solid #fdba74; color: #c2410c;
+                font-size: 13px; font-weight: bold; border-radius: 8px; padding: 0 14px;
+            }
+            QPushButton:hover { background-color: #ffedd5; }
+        """)
+        drawer_test_btn.clicked.connect(self.test_drawer)
+
         btn_layout.addWidget(cancel_btn)
+        btn_layout.addWidget(drawer_test_btn)
         btn_layout.addWidget(test_btn)
         btn_layout.addWidget(save_btn)
         main_layout.addLayout(btn_layout)
+
+    def test_drawer(self):
+        printer_name = self.printer_combo.currentText().strip()
+        if printer_name == "--- กรุณาเลือกเครื่องพิมพ์ ---" or not printer_name:
+            QMessageBox.warning(self, "แจ้งเตือน", "กรุณาเลือกเครื่องพิมพ์ก่อนทดสอบเปิดลิ้นชัก")
+            return
+        try:
+            open_cash_drawer(printer_name)
+            QMessageBox.information(self, "สำเร็จ", f"ส่งคำสั่งเปิดลิ้นชักไปยังเครื่องพิมพ์ '{printer_name}' เรียบร้อยแล้ว")
+        except Exception as e:
+            QMessageBox.critical(self, "ข้อผิดพลาด", f"ไม่สามารถเปิดลิ้นชักได้:\n{str(e)}")
 
     def save_and_test(self):
         self.save_settings(and_test=True)
@@ -756,23 +764,19 @@ class ReceiptDialog(QDialog):
         top_btns = QHBoxLayout()
 
         print_btn = QPushButton("🖨️ พิมพ์")
-
         print_btn.setStyleSheet("QPushButton { background-color: #10b981; color: white; border: none; border-radius: 8px; padding: 10px; font-weight: bold; font-size: 14px; } QPushButton:hover { background-color: #059669; }")
-
         print_btn.clicked.connect(self.print_receipt)
 
-        
+        drawer_btn = QPushButton("💵 ลิ้นชัก")
+        drawer_btn.setStyleSheet("QPushButton { background-color: #f8fafc; color: #1e293b; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px; font-weight: bold; font-size: 14px; } QPushButton:hover { background-color: #e2e8f0; }")
+        drawer_btn.clicked.connect(self.manual_open_drawer)
 
         settings_btn = QPushButton("⚙️ ตั้งค่า")
-
         settings_btn.setStyleSheet("QPushButton { background-color: white; border: 1px solid #d1d5db; border-radius: 8px; padding: 10px; font-weight: bold; } QPushButton:hover { background-color: #f3f4f6; }")
-
         settings_btn.clicked.connect(self.open_settings)
 
-        
-
         top_btns.addWidget(print_btn)
-
+        top_btns.addWidget(drawer_btn)
         top_btns.addWidget(settings_btn)
 
         self.paper_layout.addLayout(top_btns)
@@ -1024,11 +1028,9 @@ class ReceiptDialog(QDialog):
             return
 
         try:
-
             open_cash_drawer(printer_name)
-
+            QMessageBox.information(self, "สำเร็จ", f"ส่งคำสั่งเปิดลิ้นชักไปยังเครื่องพิมพ์ '{printer_name}' เรียบร้อยแล้ว")
         except Exception as e:
-
             QMessageBox.critical(self, "Error", f"ไม่สามารถเปิดลิ้นชักได้:\n{str(e)}")
 
     def print_receipt(self):
@@ -1326,28 +1328,9 @@ class ShiftReportDialog(QDialog):
             QMessageBox.warning(self, "แจ้งเตือน", "ยังไม่ได้ตั้งค่าเครื่องพิมพ์ในระบบ")
             return
 
-        offline_auth = config.get('offline_auth')
-        cashier_name = config.get('cashier_name', '')
-        if not offline_auth or cashier_name == 'Unknown' or not cashier_name:
-            QMessageBox.warning(self, "แจ้งเตือน", "กรุณาเข้าสู่ระบบแคชเชียร์ก่อนทำการเปิดลิ้นชัก (Login Required)")
-            return
-
-        from PySide6.QtWidgets import QInputDialog, QLineEdit
-        pwd, ok = QInputDialog.getText(
-            self, 
-            "ยืนยันตัวตน", 
-            f"เปิดลิ้นชักสำหรับ {cashier_name}\nกรุณาใส่รหัสผ่าน/PIN ของคุณ:", 
-            QLineEdit.Password
-        )
-        if not ok:
-            return
-        from services.offline_auth import verify_offline_login
-        if not verify_offline_login(offline_auth, offline_auth.get('code'), pwd):
-            QMessageBox.warning(self, "ข้อผิดพลาด", "รหัสผ่านไม่ถูกต้อง!")
-            return
-
         try:
             open_cash_drawer(printer_name)
+            QMessageBox.information(self, "สำเร็จ", f"ส่งคำสั่งเปิดลิ้นชักไปยังเครื่องพิมพ์ '{printer_name}' เรียบร้อยแล้ว")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"ไม่สามารถเปิดลิ้นชักได้:\n{str(e)}")
 

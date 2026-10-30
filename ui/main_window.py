@@ -1728,7 +1728,7 @@ class MainWindow(QMainWindow):
 
         
 
-        version_label = QLabel("v1.2.10")
+        version_label = QLabel("v1.2.11")
 
         version_label.setStyleSheet("font-size: 13px; color: #64748b; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 8px;")
 
@@ -2836,47 +2836,19 @@ class MainWindow(QMainWindow):
 
             return
 
-            
-
-        offline_auth = self.config.get('offline_auth')
-
-        cashier_name = self.config.get('cashier_name', '')
-
-        if not offline_auth or cashier_name == 'Unknown' or not cashier_name:
-
-            from PySide6.QtWidgets import QMessageBox
-
-            QMessageBox.warning(self, "แจ้งเตือน", "กรุณาเข้าสู่ระบบแคชเชียร์ก่อนทำการเปิดลิ้นชัก (Login Required)")
-
-            return
-
-            
-
-        from PySide6.QtWidgets import QInputDialog, QLineEdit, QMessageBox
-
-        pwd, ok = QInputDialog.getText(self, "ยืนยันตัวตน", f"เปิดลิ้นชักสำหรับ {cashier_name}\nกรุณาใส่รหัสพนักงาน Cashier PIN:", QLineEdit.Password)
-
-        if not ok:
-
-            return
-
-        from services.offline_auth import verify_offline_login
-
-        if not verify_offline_login(offline_auth, offline_auth.get('code'), pwd):
-
-            QMessageBox.warning(self, "ข้อผิดพลาด", "รหัสผ่านไม่ถูกต้อง!")
-
-            return
-
-            
-
         try:
 
             from ui.receipt_dialog import open_cash_drawer
 
             open_cash_drawer(printer_name)
 
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.information(self, "เปิดลิ้นชัก", f"ส่งคำสั่งเปิดลิ้นชักไปยังเครื่องพิมพ์ '{printer_name}' เรียบร้อยแล้ว")
+
         except Exception as e:
+
+            from PySide6.QtWidgets import QMessageBox
 
             error_msg = str(e).replace(self.config.get('pos_token', ''), '***TOKEN_HIDDEN***')
 

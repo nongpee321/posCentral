@@ -66,7 +66,7 @@ def test_receipt_dialog_matches_reference_slip(qtbot):
 
 def test_version_string_and_receipt_jumbo_sizing(qtbot):
     from ui.token_dialog import VERSION_STRING
-    assert VERSION_STRING == "1.2.10"
+    assert VERSION_STRING == "1.2.11"
 
     dlg = ReceiptDialog(None, {
         "doc_number": "POS-0001-20260417100516-247",
