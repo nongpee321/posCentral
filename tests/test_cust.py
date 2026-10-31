@@ -1,6 +1,6 @@
 ﻿import sys
 from PySide6.QtWidgets import QApplication
-app = QApplication(sys.argv)
+app = QApplication.instance() or QApplication(sys.argv)
 try:
     from ui.customer_display import CustomerDisplayWindow
     win = CustomerDisplayWindow()

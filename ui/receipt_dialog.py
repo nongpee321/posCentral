@@ -937,6 +937,11 @@ class ReceiptDialog(QDialog):
             if method == 'cash' and change_amount > Decimal('0.00') else ''
         )
 
+        reprint_html = (
+            '<div class="center" style="color: #dc2626; font-size: 13px; font-weight: bold; margin-bottom: 4px;">*** พิมพ์ซ้ำ (REPRINT) ***</div>'
+            if self.receipt_data.get('is_reprint') else ''
+        )
+
         receipt_html = f"""
         <html><head><style>
             body {{ font-family: 'Leelawadee UI', 'Tahoma', 'Arial', sans-serif; font-size: {font_body}; font-weight: 700; color: #000; margin: 0; line-height: 1.22; }}
@@ -954,6 +959,7 @@ class ReceiptDialog(QDialog):
             .footer {{ margin-top: 6px; padding-top: 3px; line-height: 1.22; font-size: {font_doc}; }}
         </style></head><body>
             <div class="receipt">
+                {reprint_html}
                 <div class="center shop">{header_html}</div>
                 <div class="center document">{'ใบกำกับภาษีอย่างย่อ' if full_tax else 'ใบรับเงิน'}</div>
                 {customer_html}

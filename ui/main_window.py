@@ -1876,7 +1876,7 @@ class MainWindow(QMainWindow):
 
         
 
-        version_label = QLabel("v1.2.22")
+        version_label = QLabel("v1.2.23")
 
         version_label.setStyleSheet("font-size: 13px; color: #64748b; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 8px;")
 
@@ -2069,6 +2069,10 @@ class MainWindow(QMainWindow):
         action_shift_report = main_menu.addAction("เช็คบิลกะ / พิมพ์ใบกะ (Z-Report)")
 
         action_shift_report.triggered.connect(self.show_shift_z_report)
+
+        action_bill_history = main_menu.addAction("ประวัติบิล / ยกเลิกบิล (Bill History & Void)")
+
+        action_bill_history.triggered.connect(self.open_bill_history_dialog)
 
         
 
@@ -3381,7 +3385,13 @@ class MainWindow(QMainWindow):
 
         self.recall_btn.clicked.connect(self.recall_held_bills)
 
-        
+        self.history_btn = QPushButton("ประวัติบิล")
+
+        self.history_btn.setToolTip("ดูประวัติบิลที่ขายไป, พิมพ์ใบเสร็จซ้ำ, หรือยกเลิก/แก้ไขบิล")
+
+        self.history_btn.setStyleSheet("background-color: #0284c7; color: white; border-radius: 6px; padding: 8px 12px; font-size: 13px; font-weight: bold;")
+
+        self.history_btn.clicked.connect(self.open_bill_history_dialog)
 
         aux_btn_layout.addWidget(self.scale_btn)
 
@@ -3390,6 +3400,8 @@ class MainWindow(QMainWindow):
         aux_btn_layout.addWidget(self.hold_btn)
 
         aux_btn_layout.addWidget(self.recall_btn)
+
+        aux_btn_layout.addWidget(self.history_btn)
 
         layout.addLayout(aux_btn_layout)
 
@@ -3849,6 +3861,87 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "พักบิลสำเร็จ", f"พักบิล '{note}' เรียบร้อยแล้ว\nสามารถเปิดการขายให้ลูกค้ารายต่อไปได้ทันที")
 
 
+
+    def open_bill_history_dialog(self):
+        from ui.bill_history_dialog import BillHistoryDialog
+        dlg = BillHistoryDialog(
+            parent=self,
+            db_path=self.db_path,
+            config=self.config,
+            current_shift=getattr(self, 'current_shift', {})
+        )
+        dlg.edit_bill_requested.connect(self.load_bill_into_cart)
+        dlg.exec()
+
+    def load_bill_into_cart(self, sale):
+        try:
+            self.cart_table.setRowCount(0)
+            items = sale.get('items', []) if isinstance(sale, dict) else [
+                {
+                    'product_id': it.product_id,
+                    'name': it.name,
+                    'qty': it.qty,
+                    'unit_price': it.unit_price,
+                    'total_price': it.total_price
+                } for it in (getattr(sale, 'items', None) or [])
+            ]
+            for it in items:
+                row = self.cart_table.rowCount()
+                self.cart_table.insertRow(row)
+
+                prod_id = it.get('product_id')
+                prod_name = it.get('name', '')
+                qty = float(it.get('qty', 1.0))
+                unit_price = float(it.get('unit_price', 0.0))
+                total_price = float(it.get('total_price', qty * unit_price))
+
+                name_item = QTableWidgetItem(str(prod_name))
+                name_item.setToolTip(str(prod_name))
+                name_item.setData(Qt.UserRole, prod_id)
+
+                qty_item = QTableWidgetItem(f"{qty:g}")
+                qty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
+                price_item = QTableWidgetItem(f"{unit_price:.2f}")
+                price_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+                total_item = QTableWidgetItem(f"{total_price:.2f}")
+                total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+                self.cart_table.setItem(row, 0, name_item)
+                self.cart_table.setItem(row, 1, qty_item)
+                self.cart_table.setItem(row, 2, price_item)
+                self.cart_table.setItem(row, 3, total_item)
+
+                manage_widget = QWidget()
+                manage_layout = QHBoxLayout(manage_widget)
+                manage_layout.setContentsMargins(0, 0, 0, 0)
+                manage_layout.setSpacing(4)
+                del_btn = QPushButton("ลบ")
+                del_btn.setStyleSheet("background-color: #ef4444; color: white; border-radius: 4px; padding: 4px 8px; font-size: 11px; font-weight: bold;")
+                del_btn.clicked.connect(lambda _, r=row: self.delete_cart_row(r))
+                manage_layout.addWidget(del_btn)
+                self.cart_table.setCellWidget(row, 4, manage_widget)
+
+            # Restore discount
+            disc = float(sale.get('discount_amount') if isinstance(sale, dict) else (getattr(sale, 'discount_amount', 0.0) or 0.0))
+            self.discount_amount = disc
+            self.discount_label = f"฿{disc:,.2f}" if disc > 0 else ""
+            self.discount_approved_by = self._resolve_discount_approver_id() if disc > 0 else None
+
+            self.update_cart_total()
+            doc_no = sale.get('doc_number') if isinstance(sale, dict) else getattr(sale, 'doc_number', '')
+            parent_widget = self if isinstance(self, QWidget) else None
+            QMessageBox.information(
+                parent_widget,
+                "แก้ไขบิล",
+                f"ดึงรายการจากบิล {doc_no} กลับเข้าตะกร้าเรียบร้อย\nสามารถแก้ไขรายการหรือคิดเงินใหม่ได้ทันที"
+            )
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            parent_widget = self if isinstance(self, QWidget) else None
+            QMessageBox.critical(parent_widget, "ข้อผิดพลาด", f"ไม่สามารถดึงรายการเข้าตะกร้าได้:\n{str(e)}")
 
     def recall_held_bills(self):
 
