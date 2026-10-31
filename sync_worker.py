@@ -816,6 +816,12 @@ class SyncWorker(QThread):
 
                         "customer_address": sale.customer_address,
 
+                        "discount_amount": float(getattr(sale, 'discount_amount', 0.0) or 0.0),
+
+                        "manual_discount_amount": float(getattr(sale, 'discount_amount', 0.0) or 0.0),
+
+                        "is_offline_sync": True,
+
                         "items": [
 
                             {

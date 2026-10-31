@@ -4490,7 +4490,7 @@ class MainWindow(QMainWindow):
 
                 "discount_amount": float(discount_applied),
 
-                "manual_discount_amount": 0.0,
+                "manual_discount_amount": float(discount_applied),
 
                 "is_offline_sync": True,
 
