@@ -74,6 +74,8 @@ class MainWindow(QMainWindow):
 
         self.discount_label = ""
 
+        self.discount_approved_by = None
+
         self._active_cashier_pin = ""
 
         self.setWindowTitle("PopCentral POS")
@@ -1874,7 +1876,7 @@ class MainWindow(QMainWindow):
 
         
 
-        version_label = QLabel("v1.2.21")
+        version_label = QLabel("v1.2.22")
 
         version_label.setStyleSheet("font-size: 13px; color: #64748b; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 8px;")
 
@@ -3583,6 +3585,19 @@ class MainWindow(QMainWindow):
 
 
 
+    def _resolve_discount_approver_id(self):
+        active_shift = getattr(self, 'current_shift', None) or {}
+        return (
+            getattr(self, 'discount_approved_by', None)
+            or self.config.get('discount_approved_by')
+            or active_shift.get('cashier_user_id')
+            or self.config.get('cashier_user_id')
+            or self.config.get('user_id')
+            or active_shift.get('cashier_id')
+            or self.config.get('cashier_id')
+            or 1
+        )
+
     def apply_discount_prompt(self):
 
         if self.cart_table.rowCount() == 0:
@@ -3614,6 +3629,14 @@ class MainWindow(QMainWindow):
             self.discount_amount = dlg.discount_amount
 
             self.discount_label = dlg.discount_label
+
+            if self.discount_amount > 0:
+
+                self.discount_approved_by = self._resolve_discount_approver_id()
+
+            else:
+
+                self.discount_approved_by = None
 
             self.update_cart_total()
 
@@ -3814,6 +3837,8 @@ class MainWindow(QMainWindow):
         self.discount_amount = 0.0
 
         self.discount_label = ""
+
+        self.discount_approved_by = None
 
         self._active_cashier_pin = ""
 
@@ -4578,48 +4603,20 @@ class MainWindow(QMainWindow):
 
 
 
-            # Calculate standard catalog gross sum and ensure standard catalog prices for ERP
-            catalog_gross_sum = 0.0
-            sync_items = []
-            for it in api_items:
-                pid = it.get('product_id')
-                p_qty = float(it.get('qty') or 0.0)
-                p_price = float(it.get('unit_price') or 0.0)
-                std_price = p_price
-                if pid:
-                    db_p = session.query(Product).filter_by(id=pid).first()
-                    if db_p:
-                        std_price = float(db_p.pos_price or db_p.default_price or p_price)
-                catalog_gross_sum += p_qty * std_price
-                sync_items.append({
-                    "product_id": pid,
-                    "qty": p_qty,
-                    "unit_price": std_price
-                })
-
             totals = self._compute_rounded_totals(total_amount)
-            catalog_reduction = max(0.0, round(catalog_gross_sum - total_amount, 2)) if total_amount > 0 and catalog_gross_sum > total_amount else 0.0
-            manual_discount = totals['manual_discount']
-            satang_discount = totals['satang_discount']
-            discount_applied = round(totals['total_discount'] + catalog_reduction, 2)
-            net_total = totals['grand_total']
+            manual_discount = round(float(totals['manual_discount']), 2)
+            satang_discount = round(float(totals['satang_discount']), 2)
+            discount_applied = round(float(totals['total_discount']), 2)
+            net_total = round(float(totals['grand_total']), 2)
+            discount_approved_by = self._resolve_discount_approver_id() if discount_applied > 0 else None
 
             idempotency_key = f"offline-receipt-{receipt_id}"
 
-            # Prepare checkout payment fields for ERP validation
-            cash_received_payload = received_amount
-            change_amount_payload = max(0, change_amount)
-            mixed_cash = cash_amount
-            mixed_transfer = transfer_amount
-
-            if method_map.get(method) == 'cash':
-                cash_received_payload = max(float(received_amount), float(net_total))
-                change_amount_payload = max(0.0, float(cash_received_payload) - float(net_total))
-            elif method_map.get(method) == 'mixed' and discount_applied > 0 and total_amount > 0:
-                cur_mix_sum = float(mixed_cash) + float(mixed_transfer)
-                diff = round(float(net_total) - cur_mix_sum, 2)
-                if diff != 0:
-                    mixed_cash = round(float(mixed_cash) + diff, 2)
+            # Keep exact receipt payment and change amounts without inflating to gross total
+            cash_received_payload = round(float(received_amount), 2)
+            change_amount_payload = max(0.0, round(float(change_amount), 2))
+            cash_amount_payload = round(float(cash_amount), 2)
+            transfer_amount_payload = round(float(transfer_amount), 2)
 
             # Create Sale record
 
@@ -4641,15 +4638,15 @@ class MainWindow(QMainWindow):
 
                 total_amount=net_total,
 
-                received_amount=received_amount,
+                received_amount=cash_received_payload,
 
                 discount_amount=discount_applied,
 
                 payment_method=method_map.get(method, 'cash'),
 
-                cash_amount=cash_amount,
+                cash_amount=cash_amount_payload,
 
-                transfer_amount=transfer_amount,
+                transfer_amount=transfer_amount_payload,
 
                 is_full_tax=is_full_tax,
 
@@ -4679,9 +4676,9 @@ class MainWindow(QMainWindow):
 
                 amount=net_total,
 
-                received_amount=received_amount,
+                received_amount=cash_received_payload,
 
-                change_amount=max(0.0, change_amount)
+                change_amount=change_amount_payload
 
             )
 
@@ -4705,9 +4702,9 @@ class MainWindow(QMainWindow):
 
                 "cash_received": cash_received_payload,
 
-                "cash_amount": mixed_cash if method_map.get(method) == 'mixed' else cash_amount,
+                "cash_amount": cash_amount_payload,
 
-                "transfer_amount": mixed_transfer if method_map.get(method) == 'mixed' else transfer_amount,
+                "transfer_amount": transfer_amount_payload,
 
                 "change_amount": change_amount_payload,
 
@@ -4721,11 +4718,13 @@ class MainWindow(QMainWindow):
 
                 "discount_amount": float(discount_applied),
 
-                "manual_discount_amount": float(discount_applied),
+                "manual_discount_amount": float(manual_discount if manual_discount > 0 else discount_applied),
+
+                "discount_approved_by": discount_approved_by,
 
                 "is_offline_sync": True,
 
-                "items": sync_items
+                "items": api_items
 
             }
 
@@ -4800,6 +4799,8 @@ class MainWindow(QMainWindow):
             self.discount_amount = 0.0
 
             self.discount_label = ""
+
+            self.discount_approved_by = None
 
             
 

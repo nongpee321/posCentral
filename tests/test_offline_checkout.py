@@ -206,3 +206,71 @@ def test_retry_reuses_legacy_idempotency_key_and_prepared_payload(tmp_path, monk
         assert outbox.payload_prepared is True
     finally:
         session.close()
+
+
+
+def test_checkout_70_discount_10_queues_exact_discount_and_approver(qtbot, tmp_path, monkeypatch):
+    db_path = str(tmp_path / "checkout_70_10.db")
+    window = MainWindow(db_path=db_path)
+    if hasattr(window, "sync_worker") and window.sync_worker:
+        window.sync_worker.is_running = False
+        window.sync_worker.wait(500)
+    qtbot.addWidget(window)
+    window.config.update({
+        "api_url": "http://erp.example",
+        "pos_token": "test-token",
+        "branch_id": 6,
+        "cashier_id": 9,
+        "user_id": 42,
+        "cashier_name": "Cashier",
+    })
+    window.current_shift = {"id": 55, "local_id": 1, "cashier_user_id": 42}
+    window.cart_table.setRowCount(1)
+    name_item = QTableWidgetItem("สินค้าทดสอบ 70")
+    name_item.setData(Qt.UserRole, 101)
+    window.cart_table.setItem(0, 0, name_item)
+    window.cart_table.setItem(0, 1, QTableWidgetItem("1"))
+    window.cart_table.setItem(0, 2, QTableWidgetItem("70"))
+    window.cart_table.setItem(0, 3, QTableWidgetItem("70"))
+    window.discount_amount = 10.0
+    window.discount_label = "฿10.00"
+    window.discount_approved_by = 42
+
+    class FakeSyncWorker:
+        force_sync_called = False
+
+        def force_sync(self):
+            self.force_sync_called = True
+
+        def get_pending_count(self):
+            return 1
+
+    class FakeReceiptDialog:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def exec(self):
+            return 0
+
+    window.sync_worker = FakeSyncWorker()
+    monkeypatch.setattr("ui.receipt_dialog.ReceiptDialog", FakeReceiptDialog)
+
+    window.process_payment("เงินสด", 60.0, 0.0, cash_amount=60.0)
+
+    session = init_db(f"sqlite:///{db_path}")
+    try:
+        sale = session.query(Sale).one()
+        outbox = session.query(Outbox).one()
+        payload = json.loads(outbox.payload_json)
+        assert sale.total_amount == 60.0
+        assert sale.discount_amount == 10.0
+        assert sale.received_amount == 60.0
+        assert payload["items"] == [{"product_id": 101, "qty": 1.0, "unit_price": 70.0}]
+        assert payload["manual_discount_amount"] == 10.0
+        assert payload["discount_amount"] == 10.0
+        assert payload["discount_approved_by"] == 42
+        assert payload["cash_received"] == 60.0
+        assert payload["cash_amount"] == 60.0
+        assert payload["change_amount"] == 0.0
+    finally:
+        session.close()

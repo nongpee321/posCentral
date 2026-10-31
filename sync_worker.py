@@ -60,6 +60,42 @@ class SyncWorker(QThread):
 
         self._consecutive_offline_count = 0
 
+    @staticmethod
+    def _is_discount_or_approval_error(error_text: str) -> bool:
+        if not error_text:
+            return False
+        text_lower = str(error_text).lower()
+        keywords = (
+            'ส่วนลดพิเศษ',
+            'สิทธิ์อนุมัติ',
+            'อนุมัติส่วนลด',
+            'ผู้จัดการที่มีสิทธิ์อนุมัติ',
+            'ต่ำกว่าทุน',
+            'บัตรส่วนลด',
+            'ราคาหรือส่วนลดเปลี่ยน',
+            'discount',
+            'override permission',
+            'approval',
+        )
+        return any(k in text_lower for k in keywords)
+
+    def _resolve_discount_approver(self, shift_data=None, payload=None, fallback_cashier_id=None):
+        if payload and payload.get('discount_approved_by'):
+            return payload.get('discount_approved_by')
+        if self.config:
+            approver = (
+                self.config.get('discount_approved_by')
+                or self.config.get('cashier_user_id')
+                or self.config.get('user_id')
+            )
+            if approver:
+                return approver
+        if isinstance(shift_data, dict) and shift_data.get('cashier_user_id'):
+            return shift_data.get('cashier_user_id')
+        if payload and payload.get('cashier_id'):
+            return payload.get('cashier_id')
+        return fallback_cashier_id or 1
+
     def _resolve_branch_and_cashier(self, session):
 
         branch_id = None
@@ -846,8 +882,20 @@ class SyncWorker(QThread):
                 if not existing_outbox:
 
                     items = session.query(SaleItem).filter_by(sale_id=sale.local_sale_id).all()
+                    payment_rec = session.query(Payment).filter_by(sale_id=sale.local_sale_id).first()
 
                     method = sale.payment_method or 'cash'
+                    disc_val = round(float(getattr(sale, 'discount_amount', 0.0) or 0.0), 2)
+                    approver_id = self._resolve_discount_approver(
+                        shift_data=shift_data,
+                        fallback_cashier_id=sale.cashier_salesman_id or cashier_id
+                    ) if disc_val > 0 else None
+                    received_val = round(float(sale.received_amount or 0.0), 2)
+                    change_val = (
+                        round(float(payment_rec.change_amount), 2)
+                        if payment_rec and payment_rec.change_amount is not None
+                        else (max(0.0, round(received_val - float(sale.cash_amount or sale.total_amount), 2)) if method in ('cash', 'mixed') else 0.0)
+                    )
 
                     payload = {
 
@@ -863,13 +911,13 @@ class SyncWorker(QThread):
 
                         "payment_confirmed": True,
 
-                        "cash_received": sale.received_amount,
+                        "cash_received": received_val,
 
-                        "cash_amount": sale.cash_amount or (sale.total_amount if method == 'cash' else 0),
+                        "cash_amount": round(float(sale.cash_amount or (sale.total_amount if method == 'cash' else 0)), 2),
 
-                        "transfer_amount": sale.transfer_amount or (sale.total_amount if method == 'transfer' else 0),
+                        "transfer_amount": round(float(sale.transfer_amount or (sale.total_amount if method == 'transfer' else 0)), 2),
 
-                        "change_amount": max(0, sale.received_amount - (sale.cash_amount or sale.total_amount)) if method in ('cash', 'mixed') else 0,
+                        "change_amount": change_val,
 
                         "is_full_tax": sale.is_full_tax,
 
@@ -879,9 +927,11 @@ class SyncWorker(QThread):
 
                         "customer_address": sale.customer_address,
 
-                        "discount_amount": float(getattr(sale, 'discount_amount', 0.0) or 0.0),
+                        "discount_amount": disc_val,
 
-                        "manual_discount_amount": float(getattr(sale, 'discount_amount', 0.0) or 0.0),
+                        "manual_discount_amount": disc_val,
+
+                        "discount_approved_by": approver_id,
 
                         "is_offline_sync": True,
 
@@ -891,9 +941,9 @@ class SyncWorker(QThread):
 
                                 "product_id": it.product_id,
 
-                                "qty": it.qty,
+                                "qty": float(it.qty),
 
-                                "unit_price": it.unit_price
+                                "unit_price": float(it.unit_price)
 
                             } for it in items
 
@@ -1011,54 +1061,43 @@ class SyncWorker(QThread):
                 # Ensure offline sync flag is present
                 payload['is_offline_sync'] = True
 
-                # Auto-heal discount and items if bill had discount or was rejected by manager approval / pricing / shortfall
-                sale_total = float(sale.total_amount if sale else (payload.get('cash_received') or 0.0))
-                payload_items = payload.get('items') or []
-                gross_sum_raw = sum(float(i.get('qty', 0) or 0) * float(i.get('unit_price', 0) or 0) for i in payload_items)
-                has_price_reduction = (sale_total > 0 and gross_sum_raw > sale_total + 0.01)
-                needs_discount_healing = (
-                    payload_items
-                    and (
-                        has_price_reduction
-                        or payload.get('manual_discount_amount', 0) > 0
-                        or payload.get('discount_amount', 0) > 0
-                        or (sale and getattr(sale, 'discount_amount', 0.0) and float(sale.discount_amount) > 0)
-                        or (entry.last_error and any(err in entry.last_error for err in ('ส่วนลดพิเศษ', 'สิทธิ์อนุมัติ', 'ไม่ครบ', 'ราคาหรือส่วนลดเปลี่ยน')))
-                        or (sale and sale.sync_error and any(err in sale.sync_error for err in ('ส่วนลดพิเศษ', 'สิทธิ์อนุมัติ', 'ไม่ครบ', 'ราคาหรือส่วนลดเปลี่ยน')))
-                    )
+                # If this bill previously failed due to discount/approval validation, hold it for inspection
+                # and never strip the discount or rewrite item prices to full catalog price.
+                prev_error = entry.last_error or (sale.sync_error if sale else '') or ''
+                if entry.status == 'failed' and (
+                    payload.get('held_for_discount_review')
+                    or self._is_discount_or_approval_error(prev_error)
+                ):
+                    payload['held_for_discount_review'] = True
+                    entry.payload_json = json.dumps(payload)
+                    if sale:
+                        sale.status = 'failed'
+                    session.commit()
+                    failed_count += 1
+                    continue
+
+                # Preserve exact item prices, payment amounts, and discounts on retry.
+                # Ensure manual_discount_amount, discount_amount, and discount_approved_by are sent completely.
+                disc_val = round(
+                    float(
+                        payload.get('manual_discount_amount')
+                        or payload.get('discount_amount')
+                        or (getattr(sale, 'discount_amount', 0.0) if sale else 0.0)
+                        or 0.0
+                    ),
+                    2
                 )
-
-                if needs_discount_healing:
-                    # Ensure items have standard catalog prices so PosPricingGuard passes with 0 discrepancy
-                    for it in payload_items:
-                        prod_id = it.get('product_id')
-                        if prod_id:
-                            prod_record = session.query(Product).filter_by(id=prod_id).first()
-                            if prod_record:
-                                cat_price = float(prod_record.pos_price or prod_record.default_price or it.get('unit_price', 0.0))
-                                if cat_price > 0 and abs(float(it.get('unit_price', 0.0)) - cat_price) > 0.01:
-                                    it['unit_price'] = cat_price
-
-                    gross_sum = sum(float(i.get('qty', 0) or 0) * float(i.get('unit_price', 0) or 0) for i in payload_items)
-                    discount_val = max(0.0, round(gross_sum - sale_total, 2)) if (sale_total > 0 and gross_sum > sale_total) else float(payload.get('discount_amount') or (getattr(sale, 'discount_amount', 0.0) if sale else 0.0) or 0.0)
-
-                    # Update discount fields: manual_discount_amount must be 0 so manager permission is never required
-                    payload['discount_amount'] = discount_val
-                    payload['manual_discount_amount'] = 0.0
-
-                    # Fix cash payments: PosPaymentValidator requires cash_received >= gross sum
-                    if payload.get('method') == 'cash':
-                        orig_received = float(payload.get('cash_received') or 0.0)
-                        if orig_received < gross_sum:
-                            payload['cash_received'] = gross_sum
-                            payload['change_amount'] = max(0.0, round(gross_sum - sale_total, 2))
-
-                    # Fix mixed payments: cash_amount + transfer_amount == gross_sum
-                    if payload.get('method') == 'mixed' and gross_sum > 0:
-                        cur_mix_sum = float(payload.get('cash_amount') or 0.0) + float(payload.get('transfer_amount') or 0.0)
-                        diff = round(gross_sum - cur_mix_sum, 2)
-                        if abs(diff) > 0.01:
-                            payload['cash_amount'] = round(float(payload.get('cash_amount') or 0.0) + diff, 2)
+                if disc_val > 0:
+                    payload['manual_discount_amount'] = disc_val
+                    payload['discount_amount'] = disc_val
+                    payload['discount_approved_by'] = self._resolve_discount_approver(
+                        shift_data=shift_data,
+                        payload=payload,
+                        fallback_cashier_id=cashier_id
+                    )
+                else:
+                    payload['manual_discount_amount'] = float(payload.get('manual_discount_amount') or 0.0)
+                    payload['discount_amount'] = float(payload.get('discount_amount') or 0.0)
 
                 # If transfer or mixed, ensure transfer validation fields are present
                 if payload.get('method') in ('transfer', 'mixed'):
@@ -1120,17 +1159,25 @@ class SyncWorker(QThread):
 
                     elif 400 <= checkout_response.status_code < 500:
 
+                        err_text = checkout_response.text
+
+                        if self._is_discount_or_approval_error(err_text):
+
+                            payload['held_for_discount_review'] = True
+
+                            entry.payload_json = json.dumps(payload)
+
                         entry.status = 'failed'
 
                         entry.retry_count += 1
 
-                        entry.last_error = checkout_response.text
+                        entry.last_error = err_text
 
                         if sale:
 
                             sale.status = 'failed'
 
-                            sale.sync_error = checkout_response.text
+                            sale.sync_error = err_text
 
                         failed_count += 1
 
