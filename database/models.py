@@ -63,6 +63,24 @@ class ProductBarcode(Base):
     unit_factor = Column(Float, nullable=True, default=1.0)
     price = Column(Float, nullable=True)
 
+# 3.2 qty_promotions: active quantity/bundle campaigns (e.g. 3 packs 100 Baht, buy 2 get 1 free)
+class QtyPromotion(Base):
+    __tablename__ = 'qty_promotions'
+
+    id = Column(Integer, primary_key=True)
+    code = Column(String(50), nullable=True)
+    name = Column(String(150), nullable=False)
+    promo_type = Column(String(30), nullable=False, default='bundle_price')
+    product_id = Column(Integer, nullable=False, index=True)
+    min_qty = Column(Float, nullable=False, default=1.0)
+    free_product_id = Column(Integer, nullable=True)
+    free_qty = Column(Float, nullable=True, default=0.0)
+    discount_type = Column(String(20), nullable=True)
+    discount_value = Column(Float, nullable=True, default=0.0)
+    bundle_price = Column(Float, nullable=True)
+    branch_id = Column(Integer, nullable=True)
+    is_active = Column(Boolean, default=True)
+
 # 4. scale_profiles
 class ScaleProfile(Base):
     __tablename__ = 'scale_profiles'
@@ -371,6 +389,7 @@ def init_db(db_path=None):
             conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_pb_product_id ON product_barcodes(product_id)")
             conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_sales_status ON sales(status)")
             conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox(status)")
+            conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_qty_promotions_prod ON qty_promotions(product_id, is_active)")
 
             try:
                 conn.exec_driver_sql(

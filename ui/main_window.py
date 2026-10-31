@@ -76,6 +76,10 @@ class MainWindow(QMainWindow):
 
         self.discount_approved_by = None
 
+        self.promo_discount_amount = 0.0
+
+        self.promo_discount_details = []
+
         self._active_cashier_pin = ""
 
         self.setWindowTitle("PopCentral POS")
@@ -1865,109 +1869,120 @@ class MainWindow(QMainWindow):
 
         
 
-    def _compute_rounded_totals(self, subtotal):
-
+    def _compute_rounded_totals(self, subtotal, promo_discount=None):
         from decimal import Decimal
+        if promo_discount is None:
+            promo_discount = getattr(self, 'promo_discount_amount', 0.0)
 
         sub_dec = Decimal(str(round(max(0.0, float(subtotal or 0.0)), 2))).quantize(Decimal('0.01'))
-
-        disc_dec = min(Decimal(str(round(max(0.0, float(getattr(self, 'discount_amount', 0.0))), 2))).quantize(Decimal('0.01')), sub_dec)
-
-        net_total = max(Decimal('0.00'), sub_dec - disc_dec).quantize(Decimal('0.01'))
+        promo_dec = min(Decimal(str(round(max(0.0, float(promo_discount or 0.0)), 2))).quantize(Decimal('0.01')), sub_dec)
+        sub_after_promo = max(Decimal('0.00'), sub_dec - promo_dec)
+        manual_dec = min(Decimal(str(round(max(0.0, float(getattr(self, 'discount_amount', 0.0))), 2))).quantize(Decimal('0.01')), sub_after_promo)
+        total_disc = promo_dec + manual_dec
+        net_total = max(Decimal('0.00'), sub_dec - total_disc).quantize(Decimal('0.01'))
 
         return {
-
             'subtotal': float(sub_dec),
-
-            'manual_discount': float(disc_dec),
-
+            'promo_discount': float(promo_dec),
+            'manual_discount': float(manual_dec),
             'satang_discount': 0.0,
-
-            'total_discount': float(disc_dec),
-
+            'total_discount': float(total_disc),
             'grand_total': float(net_total),
-
         }
 
-
-
     def update_cart_total(self):
-
         try:
-
             subtotal = 0.0
-
+            cart_items = []
             for row in range(self.cart_table.rowCount()):
-
                 item = self.cart_table.item(row, 3)
-
                 if item:
+                    try:
+                        subtotal += float(item.text().replace(',', ''))
+                    except (ValueError, TypeError):
+                        pass
 
-                    subtotal += float(item.text().replace(',', ''))
-
-            
+                name_item = self.cart_table.item(row, 0)
+                qty_item = self.cart_table.item(row, 1)
+                price_item = self.cart_table.item(row, 2)
+                if name_item and qty_item and price_item:
+                    pid = name_item.data(Qt.UserRole)
+                    try:
+                        cart_items.append({
+                            'product_id': pid,
+                            'qty': float(qty_item.text().replace(',', '')),
+                            'unit_price': float(price_item.text().replace(',', '')),
+                            'name': name_item.text()
+                        })
+                    except (ValueError, TypeError):
+                        pass
 
             # Reset discount if cart is empty
-
             if subtotal <= 0:
-
                 self.discount_amount = 0.0
-
                 self.discount_label = ""
+                self.promo_discount_amount = 0.0
+                self.promo_discount_details = []
+            else:
+                try:
+                    from services.promotion_engine import evaluate_promotions
+                    db_path = getattr(self, 'db_path', self.db_path)
+                    session = init_db(f"sqlite:///{db_path}")
+                    try:
+                        cur_branch_id = (getattr(self, 'current_shift', None) or {}).get('branch_id')
+                        p_disc, p_details = evaluate_promotions(session, cart_items, branch_id=cur_branch_id)
+                        self.promo_discount_amount = p_disc
+                        self.promo_discount_details = p_details
+                    finally:
+                        session.close()
+                except Exception:
+                    self.promo_discount_amount = 0.0
+                    self.promo_discount_details = []
 
-            
-
-            totals = self._compute_rounded_totals(subtotal)
-
+            totals = self._compute_rounded_totals(subtotal, getattr(self, 'promo_discount_amount', 0.0))
+            promo_discount = totals['promo_discount']
             discount = totals['manual_discount']
-
+            total_discount = totals['total_discount']
             grand_total = totals['grand_total']
 
-            
-
             if hasattr(self, 'subtotal_val'):
-
                 self.subtotal_val.setText(f"฿{subtotal:,.2f}")
 
+            if hasattr(self, 'promo_container'):
+                if promo_discount > 0:
+                    details = getattr(self, 'promo_discount_details', [])
+                    if details:
+                        labels = ", ".join(d.get('label') or d.get('name') for d in details if d.get('label') or d.get('name'))
+                        p_lbl = f" ({labels})" if labels else ""
+                    else:
+                        p_lbl = ""
+                    self.promo_title_lbl.setText(f"โปรโมชั่น{p_lbl}:")
+                    self.promo_val.setText(f"-฿{promo_discount:,.2f}")
+                    self.promo_container.show()
+                else:
+                    self.promo_container.hide()
+
             if hasattr(self, 'discount_container'):
-
                 if discount > 0:
-
                     lbl = f" ({self.discount_label})" if self.discount_label else ""
-
                     self.discount_title_lbl.setText(f"ส่วนลด{lbl}:")
-
                     self.discount_val.setText(f"-฿{discount:,.2f}")
-
                     self.discount_container.show()
-
                 else:
-
                     self.discount_container.hide()
-
             elif hasattr(self, 'discount_val'):
-
                 if discount > 0:
-
                     lbl = f" ({self.discount_label})" if self.discount_label else ""
-
                     self.discount_title_lbl.setText(f"ส่วนลด{lbl}:")
-
                     self.discount_val.setText(f"-฿{discount:,.2f}")
-
                 else:
-
                     self.discount_title_lbl.setText("ส่วนลด:")
-
                     self.discount_val.setText("-฿0.00")
-
-            
 
             self.total_val.setText(f"฿{grand_total:,.2f}")
 
             if hasattr(self, 'customer_display') and self.customer_display and not self.customer_display.isHidden():
-
-                self.customer_display.update_cart(self.cart_table, grand_total, subtotal=subtotal, discount=discount)
+                self.customer_display.update_cart(self.cart_table, grand_total, subtotal=subtotal, discount=total_discount)
 
         except Exception as e:
 
@@ -2027,7 +2042,7 @@ class MainWindow(QMainWindow):
 
         
 
-        version_label = QLabel("v1.2.24")
+        version_label = QLabel("v1.2.25")
 
         version_label.setStyleSheet("font-size: 13px; color: #64748b; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 8px;")
 
@@ -3462,6 +3477,20 @@ class MainWindow(QMainWindow):
 
         
 
+        # Promotion discount row (Auto-applied bundle / qty promotions)
+        self.promo_container = QWidget()
+        self.promo_row = QHBoxLayout(self.promo_container)
+        self.promo_row.setContentsMargins(0, 0, 0, 0)
+        self.promo_title_lbl = QLabel("โปรโมชั่น:")
+        self.promo_title_lbl.setStyleSheet("font-size: 14px; color: #16a34a; font-weight: bold;")
+        self.promo_val = QLabel("-฿0.00")
+        self.promo_val.setStyleSheet("font-size: 15px; color: #16a34a; font-weight: bold;")
+        self.promo_val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.promo_row.addWidget(self.promo_title_lbl)
+        self.promo_row.addWidget(self.promo_val)
+        self.promo_container.hide()
+        total_layout.addWidget(self.promo_container)
+
         # Discount row
 
         self.discount_container = QWidget()
@@ -4889,12 +4918,14 @@ class MainWindow(QMainWindow):
 
 
 
-            totals = self._compute_rounded_totals(total_amount)
+            totals = self._compute_rounded_totals(total_amount, getattr(self, 'promo_discount_amount', 0.0))
             manual_discount = round(float(totals['manual_discount']), 2)
+            promo_discount = round(float(totals.get('promo_discount', 0.0)), 2)
             satang_discount = round(float(totals['satang_discount']), 2)
             discount_applied = round(float(totals['total_discount']), 2)
             net_total = round(float(totals['grand_total']), 2)
-            discount_approved_by = self._resolve_discount_approver_id() if discount_applied > 0 else None
+            # Only manual discount requires approval, automatic promotions are pre-authorized
+            discount_approved_by = self._resolve_discount_approver_id() if manual_discount > 0 else None
 
             idempotency_key = f"offline-receipt-{receipt_id}"
 
@@ -5004,7 +5035,9 @@ class MainWindow(QMainWindow):
 
                 "discount_amount": float(discount_applied),
 
-                "manual_discount_amount": float(manual_discount if manual_discount > 0 else discount_applied),
+                "manual_discount_amount": float(manual_discount),
+
+                "promo_discount_amount": float(promo_discount),
 
                 "discount_approved_by": discount_approved_by,
 
@@ -5081,12 +5114,18 @@ class MainWindow(QMainWindow):
             # Reset discount after successful checkout
 
             saved_discount = discount_applied
+            promo_details_for_receipt = list(getattr(self, 'promo_discount_details', []))
+            promo_name_for_receipt = ", ".join(d.get('label') or d.get('name') for d in promo_details_for_receipt if d.get('label') or d.get('name')) if promo_details_for_receipt else ""
 
             self.discount_amount = 0.0
 
             self.discount_label = ""
 
             self.discount_approved_by = None
+
+            self.promo_discount_amount = 0.0
+
+            self.promo_discount_details = []
 
             
 
@@ -5118,7 +5157,15 @@ class MainWindow(QMainWindow):
 
                 'total': net_total,
 
-                'discount_amount': manual_discount,
+                'discount_amount': float(saved_discount),
+
+                'manual_discount_amount': float(manual_discount),
+
+                'promo_discount_amount': float(promo_discount),
+
+                'promo_name': promo_name_for_receipt,
+
+                'promo_details': promo_details_for_receipt,
 
                 'satang_discount': satang_discount,
 

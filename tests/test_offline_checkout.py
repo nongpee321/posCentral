@@ -180,7 +180,7 @@ def test_retry_reuses_legacy_idempotency_key_and_prepared_payload(tmp_path, monk
     monkeypatch.setattr(
         sync_worker_module.requests,
         "get",
-        lambda *args, **kwargs: FakeResponse(shift_ids.pop(0) if shift_ids else {"id": 56, "branch_id": 6, "cashier_id": 10}),
+        lambda url, *args, **kwargs: FakeResponse(shift_ids.pop(0) if (shift_ids and '/shift' in str(url)) else {"id": 56, "branch_id": 6, "cashier_id": 10}),
     )
     posted_requests = []
 

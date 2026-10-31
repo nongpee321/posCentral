@@ -321,10 +321,20 @@ def print_escpos_receipt(printer_name, receipt_data, config):
     cmds += enc('-' * 48) + LINE_FEED
     
     subtotal = sum(float(it.get('total', 0.0)) for it in receipt_data.get('items', []))
-    discount = float(receipt_data.get('discount_amount', 0.0))
-    if discount > 0:
+    total_disc = float(receipt_data.get('discount_amount', 0.0))
+    promo_disc = float(receipt_data.get('promo_discount_amount', 0.0))
+    manual_disc = max(0.0, total_disc - promo_disc)
+    promo_name = str(receipt_data.get('promo_name', ''))
+
+    if total_disc > 0:
         cmds += enc(f"รวมเป็นเงิน: {subtotal:,.2f}") + LINE_FEED
-        cmds += enc(f"ส่วนลด: -{discount:,.2f}") + LINE_FEED
+        if promo_disc > 0:
+            p_lbl = f" ({promo_name})" if promo_name else ""
+            cmds += enc(f"โปรโมชั่น{p_lbl}: -{promo_disc:,.2f}") + LINE_FEED
+        if manual_disc > 0:
+            cmds += enc(f"ส่วนลดพิเศษ: -{manual_disc:,.2f}") + LINE_FEED
+        elif promo_disc <= 0:
+            cmds += enc(f"ส่วนลด: -{total_disc:,.2f}") + LINE_FEED
         cmds += enc('-' * 48) + LINE_FEED
     
     vat_rate = _receipt_amount(receipt_data.get('vat_rate', 7))
@@ -920,10 +930,19 @@ class ReceiptDialog(QDialog):
             """
 
         satang_html = ""
-        discount_html = (
-            f'<tr class="item-row"><td colspan="2" class="item-desc">ส่วนลด</td><td class="unit"></td><td class="amount">-{manual_discount:,.2f}&nbsp;&nbsp;</td></tr>'
-            if manual_discount > Decimal('0.00') else ''
-        )
+        total_disc = _receipt_amount(self.receipt_data.get('discount_amount', 0)).quantize(Decimal('0.01'))
+        promo_disc = _receipt_amount(self.receipt_data.get('promo_discount_amount', 0)).quantize(Decimal('0.01'))
+        manual_disc = max(Decimal('0.00'), total_disc - promo_disc)
+        promo_name = safe(self.receipt_data.get('promo_name', ''))
+
+        discount_html = ""
+        if promo_disc > Decimal('0.00'):
+            p_lbl = f" ({promo_name})" if promo_name else ""
+            discount_html += f'<tr class="item-row"><td colspan="2" class="item-desc">โปรโมชั่น{p_lbl}</td><td class="unit"></td><td class="amount">-{promo_disc:,.2f}&nbsp;&nbsp;</td></tr>'
+        if manual_disc > Decimal('0.00'):
+            discount_html += f'<tr class="item-row"><td colspan="2" class="item-desc">ส่วนลดพิเศษ</td><td class="unit"></td><td class="amount">-{manual_disc:,.2f}&nbsp;&nbsp;</td></tr>'
+        elif promo_disc <= Decimal('0.00') and total_disc > Decimal('0.00'):
+            discount_html += f'<tr class="item-row"><td colspan="2" class="item-desc">ส่วนลด</td><td class="unit"></td><td class="amount">-{total_disc:,.2f}&nbsp;&nbsp;</td></tr>' 
         vat_html = (
             f'<tr class="item-row"><td colspan="2" class="item-desc">มูลค่าสินค้าก่อน VAT</td><td class="unit"></td><td class="amount">{before_vat:,.2f}&nbsp;&nbsp;</td></tr>'
             f'<tr class="item-row"><td colspan="2" class="item-desc">VAT {vat_rate}%</td><td class="unit"></td><td class="amount">{vat_amount:,.2f}&nbsp;&nbsp;</td></tr>'

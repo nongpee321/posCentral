@@ -16,7 +16,7 @@ import threading
 
 from database.models import (
 
-    init_db, Product, ProductBarcode, Category, Sale, SaleItem, Payment, Outbox, SyncLog, PosShift
+    init_db, Product, ProductBarcode, Category, Sale, SaleItem, Payment, Outbox, SyncLog, PosShift, QtyPromotion
 
 )
 
@@ -646,6 +646,9 @@ class SyncWorker(QThread):
 
             session.commit()
 
+            # 3.5 Sync QtyPromotions for bundle / buy-N promotions
+            self._sync_promotions(session, headers)
+
             # Record in sync_logs
 
             log = SyncLog(
@@ -701,6 +704,44 @@ class SyncWorker(QThread):
         finally:
 
             session.close()
+
+    def _sync_promotions(self, session, headers):
+        """Fetch active QtyPromotion rules from ERP so promotions evaluate offline."""
+        try:
+            branch_id, _ = self._resolve_branch_and_cashier(session)
+            params = {}
+            if branch_id:
+                params['branch_id'] = branch_id
+
+            resp = requests.get(
+                f'{self.api_url}/api/pos/promotions',
+                headers=headers,
+                params=params,
+                timeout=10
+            )
+            if resp.status_code == 200:
+                promos = resp.json()
+                if isinstance(promos, list):
+                    session.query(QtyPromotion).delete(synchronize_session=False)
+                    for item in promos:
+                        session.add(QtyPromotion(
+                            id=item.get('id'),
+                            code=item.get('code'),
+                            name=item.get('name') or '',
+                            promo_type=item.get('promo_type') or 'bundle_price',
+                            product_id=item.get('product_id'),
+                            min_qty=float(item.get('min_qty') or 1.0),
+                            free_product_id=item.get('free_product_id'),
+                            free_qty=float(item.get('free_qty') or 0.0),
+                            discount_type=item.get('discount_type'),
+                            discount_value=float(item.get('discount_value') or 0.0),
+                            bundle_price=float(item.get('bundle_price')) if item.get('bundle_price') is not None else None,
+                            branch_id=item.get('branch_id'),
+                            is_active=True,
+                        ))
+                    session.commit()
+        except Exception:
+            pass
 
     def _sync_outbox_sales(self):
 
