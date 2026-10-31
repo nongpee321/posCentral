@@ -212,6 +212,22 @@ def find_partial(session, digits):
     return list(found.values()) if len(found) == 1 else []
 
 
+def find_by_name(session, text):
+    """Search products by name_th (case-insensitive substring) or SKU keyword."""
+    if not text:
+        return []
+    clean = str(text).strip()
+    if len(clean) < 1:
+        return []
+    like = f"%{clean}%"
+    return _active(session.query(Product).filter(
+        or_(
+            Product.name_th.like(like),
+            Product.sku_code.like(like)
+        )
+    )).order_by(Product.name_th).limit(40).all()
+
+
 def matched_unit_factor(session, product_id, raw):
     """Units per scan for the barcode that was scanned (pack/carton barcodes > 1)."""
     text, digits = normalize_scan_text(raw)
@@ -310,5 +326,10 @@ def lookup_product(session, raw, scale_parser=None):
     partial = find_partial(session, digits)
     if partial:
         return _result(partial)
+
+    # 5. Search by product name (name_th) or keyword
+    name_matches = find_by_name(session, text)
+    if name_matches:
+        return _result(name_matches)
 
     return {'status': 'not_found', 'code': code}

@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 
                                QGridLayout, QScrollArea, QFrame, QTableWidget, QHeaderView,
 
-                               QInputDialog, QMessageBox, QTableWidgetItem, QDialog)
+                               QInputDialog, QMessageBox, QTableWidgetItem, QDialog, QListWidget, QListWidgetItem)
 
 from PySide6.QtCore import Qt, QTimer
 
@@ -28,7 +28,7 @@ from database.models import (
 
     init_db, Product, Category, PosReceipt, PosReceiptItem, PosShift,
 
-    Sale, SaleItem, Payment, Outbox, SyncLog, ScaleProfile,
+    Sale, SaleItem, Payment, Outbox, SyncLog, ScaleProfile, ProductBarcode,
 
     get_pos_data_paths, backup_pos_db, restore_pos_db
 
@@ -666,7 +666,7 @@ class MainWindow(QMainWindow):
 
 
 
-    def render_products_grid(self, cat_id=None, limit=60, offset=0):
+    def render_products_grid(self, cat_id=None, limit=60, offset=0, search_query=None):
 
         """เรนเดอร์รายการสินค้าลงในตารางแบบจำกัดจำนวน (Page-based) เพื่อความเร็วสูงสุดและไม่ค้าง/ไม่เด้ง"""
 
@@ -694,7 +694,35 @@ class MainWindow(QMainWindow):
 
             query = session.query(Product).filter(Product.is_active == True)
 
-            if cat_id is not None:
+            clean_sq = str(search_query or '').strip()
+
+            if clean_sq:
+
+                from sqlalchemy import or_
+
+                sq = f"%{clean_sq}%"
+
+                matching_pids = [
+
+                    row[0] for row in session.query(ProductBarcode.product_id)
+
+                    .filter(ProductBarcode.barcode.like(sq)).all()
+
+                ]
+
+                query = query.filter(or_(
+
+                    Product.name_th.like(sq),
+
+                    Product.sku_code.like(sq),
+
+                    Product.barcode.like(sq),
+
+                    Product.id.in_(matching_pids)
+
+                ))
+
+            elif cat_id is not None:
 
                 query = query.filter(Product.category_id == cat_id)
 
@@ -810,7 +838,7 @@ class MainWindow(QMainWindow):
 
 
 
-    def load_more_products(self, cat_id, limit, next_offset):
+    def load_more_products(self, cat_id, limit, next_offset, search_query=None):
 
         """โหลดสินค้าแถวถัดไปมาต่อท้ายโดยไม่ต้องโหลดใหม่ทั้งหมด"""
 
@@ -838,7 +866,35 @@ class MainWindow(QMainWindow):
 
             query = session.query(Product).filter(Product.is_active == True)
 
-            if cat_id is not None:
+            clean_sq = str(search_query or '').strip()
+
+            if clean_sq:
+
+                from sqlalchemy import or_
+
+                sq = f"%{clean_sq}%"
+
+                matching_pids = [
+
+                    row[0] for row in session.query(ProductBarcode.product_id)
+
+                    .filter(ProductBarcode.barcode.like(sq)).all()
+
+                ]
+
+                query = query.filter(or_(
+
+                    Product.name_th.like(sq),
+
+                    Product.sku_code.like(sq),
+
+                    Product.barcode.like(sq),
+
+                    Product.id.in_(matching_pids)
+
+                ))
+
+            elif cat_id is not None:
 
                 query = query.filter(Product.category_id == cat_id)
 
@@ -1051,7 +1107,102 @@ class MainWindow(QMainWindow):
 
 
 
+    def on_search_text_changed(self, text):
+        clean_text = str(text or "").strip()
+        if len(clean_text) >= 1:
+            self._update_search_suggestions(clean_text)
+            self.render_products_grid(search_query=clean_text)
+        else:
+            if hasattr(self, 'suggestions_list'):
+                self.suggestions_list.clear()
+                self.suggestions_list.hide()
+            self.render_products_grid(cat_id=getattr(self, 'selected_category_id', None))
+
+    def _update_search_suggestions(self, clean_text):
+        if not hasattr(self, 'suggestions_list'):
+            return
+        if not clean_text:
+            self.suggestions_list.clear()
+            self.suggestions_list.hide()
+            return
+
+        session = None
+        try:
+            from database.models import Product, ProductBarcode
+            from sqlalchemy import or_
+            session = init_db(f"sqlite:///{self.db_path}")
+            sq = f"%{clean_text}%"
+            matching_pids = [
+                row[0] for row in session.query(ProductBarcode.product_id)
+                .filter(ProductBarcode.barcode.like(sq)).limit(20).all()
+            ]
+            matches = session.query(Product).filter(
+                Product.is_active == True,
+                or_(
+                    Product.name_th.like(sq),
+                    Product.sku_code.like(sq),
+                    Product.barcode.like(sq),
+                    Product.id.in_(matching_pids)
+                )
+            ).order_by(Product.name_th).limit(8).all()
+
+            self.suggestions_list.clear()
+            if not matches:
+                self.suggestions_list.hide()
+                return
+
+            from PySide6.QtGui import QFont
+            for p in matches:
+                price = float(p.pos_price if p.pos_price is not None and p.pos_price > 0 else (p.default_price or 0.0))
+                is_promo = bool(getattr(p, 'is_promotion', False))
+                promo_tag = " [ลดพิเศษ]" if is_promo else ""
+                code_tag = f" ({p.barcode or p.sku_code})" if (p.barcode or p.sku_code) else ""
+                item_text = f"{p.name_th}{code_tag}  —  ฿{price:,.2f}{promo_tag}"
+
+                list_item = QListWidgetItem(item_text)
+                list_item.setFont(QFont("Tahoma", 13, QFont.Bold))
+                p_dict = {
+                    'id': p.id,
+                    'sku_code': str(p.sku_code),
+                    'name_th': str(p.name_th),
+                    'default_price': float(p.default_price or 0.0),
+                    'pos_price': float(p.pos_price) if p.pos_price is not None else None,
+                    'is_promotion': is_promo,
+                    'is_scale_item': bool(p.is_scale_item),
+                    'stock_qty': float(p.stock_qty) if p.stock_qty is not None else 999999,
+                }
+                list_item.setData(Qt.UserRole, p_dict)
+                self.suggestions_list.addItem(list_item)
+
+            self.suggestions_list.setFixedHeight(min(240, max(46, len(matches) * 38 + 6)))
+            self.suggestions_list.show()
+        except Exception:
+            pass
+        finally:
+            if session:
+                session.close()
+
+    def on_suggestion_clicked(self, list_item):
+        if not list_item:
+            return
+        p_dict = list_item.data(Qt.UserRole)
+        if p_dict:
+            if hasattr(self, 'suggestions_list'):
+                self.suggestions_list.clear()
+                self.suggestions_list.hide()
+            self.search_input.blockSignals(True)
+            self.search_input.clear()
+            self.search_input.blockSignals(False)
+            self.handle_product_click(p_dict)
+            self.render_products_grid(cat_id=getattr(self, 'selected_category_id', None))
+
     def handle_barcode_scan(self):
+
+        if hasattr(self, 'suggestions_list') and self.suggestions_list.isVisible():
+            if self.suggestions_list.count() == 1:
+                item = self.suggestions_list.item(0)
+                self.on_suggestion_clicked(item)
+                return
 
         raw_query = str(self.search_input.text())
 
@@ -1876,7 +2027,7 @@ class MainWindow(QMainWindow):
 
         
 
-        version_label = QLabel("v1.2.23")
+        version_label = QLabel("v1.2.24")
 
         version_label.setStyleSheet("font-size: 13px; color: #64748b; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 8px;")
 
@@ -3069,6 +3220,7 @@ class MainWindow(QMainWindow):
         self.search_input.setStyleSheet("padding: 10px; font-size: 16px; border: 1px solid #cbd5e1; border-radius: 6px; color: black;")
 
         self.search_input.returnPressed.connect(self.handle_barcode_scan)
+        self.search_input.textChanged.connect(self.on_search_text_changed)
 
         # Barcode scanners "type" very fast. If focus is on the cart table or a button,
         # the first digits used to be swallowed by that widget, so the code arrived
@@ -3096,6 +3248,31 @@ class MainWindow(QMainWindow):
         search_layout.addWidget(search_btn)
 
         layout.addLayout(search_layout)
+
+        # Autocomplete suggestions list
+        self.suggestions_list = QListWidget()
+        self.suggestions_list.setStyleSheet("""
+            QListWidget {
+                background-color: #ffffff;
+                border: 2px solid #0284c7;
+                border-radius: 6px;
+                font-size: 14px;
+                color: #0f172a;
+            }
+            QListWidget::item {
+                padding: 10px 14px;
+                border-bottom: 1px solid #f1f5f9;
+            }
+            QListWidget::item:hover, QListWidget::item:selected {
+                background-color: #e0f2fe;
+                color: #0369a1;
+                font-weight: bold;
+            }
+        """)
+        self.suggestions_list.hide()
+        self.suggestions_list.itemClicked.connect(self.on_suggestion_clicked)
+        self.suggestions_list.itemActivated.connect(self.on_suggestion_clicked)
+        layout.addWidget(self.suggestions_list)
 
         
 
@@ -3468,9 +3645,25 @@ class MainWindow(QMainWindow):
             from PySide6.QtWidgets import QTextEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox
 
             focus = QApplication.focusWidget()
+            key = event.key()
 
             if focus is search:
+                if key == Qt.Key_Down and hasattr(self, 'suggestions_list') and self.suggestions_list.isVisible():
+                    self.suggestions_list.setFocus()
+                    self.suggestions_list.setCurrentRow(0)
+                    return True
                 return super().eventFilter(obj, event)
+
+            if hasattr(self, 'suggestions_list') and focus is self.suggestions_list:
+                if key in (Qt.Key_Return, Qt.Key_Enter):
+                    cur = self.suggestions_list.currentItem()
+                    if cur:
+                        self.on_suggestion_clicked(cur)
+                        return True
+                elif key == Qt.Key_Escape:
+                    self.suggestions_list.hide()
+                    search.setFocus()
+                    return True
 
             if isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox)):
                 return super().eventFilter(obj, event)
