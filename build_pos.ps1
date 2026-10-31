@@ -1,10 +1,14 @@
 param(
-    [string]$Version = "1.2.15"
+    [string]$Version = "1.2.16"
 )
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$python = Join-Path $projectRoot "venv\Scripts\python.exe"
+$python = if (Test-Path (Join-Path $projectRoot "venv\Scripts\python.exe")) {
+    Join-Path $projectRoot "venv\Scripts\python.exe"
+} else {
+    "D:\pop-erp-food\ERPPOP-main\apps\python-pos\venv\Scripts\python.exe"
+}
 $sevenZip = "C:\Program Files\7-Zip\7z.exe"
 $sfxModule = "C:\Program Files\7-Zip\7z.sfx"
 $releaseDirectory = Join-Path (Split-Path -Parent (Split-Path -Parent $projectRoot)) "storage\app\pos-python-releases"

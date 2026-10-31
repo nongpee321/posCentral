@@ -1027,6 +1027,19 @@ class ReceiptDialog(QDialog):
 
             return
 
+        # Require PIN to open drawer
+        from ui.drawer_pin_dialog import DrawerPinDialog
+        pin_dialog = DrawerPinDialog(
+            self,
+            api_url=config.get('api_url', ''),
+            pos_token=config.get('pos_token', ''),
+            cashier_code=config.get('cashier_code') or config.get('cashier_username', ''),
+            offline_auth=config.get('offline_auth'),
+            active_pin=getattr(parent_window, '_active_cashier_pin', '') if parent_window else ''
+        )
+        if pin_dialog.exec() != QDialog.Accepted:
+            return
+
         try:
             open_cash_drawer(printer_name)
             QMessageBox.information(self, "สำเร็จ", f"ส่งคำสั่งเปิดลิ้นชักไปยังเครื่องพิมพ์ '{printer_name}' เรียบร้อยแล้ว")
@@ -1326,6 +1339,19 @@ class ShiftReportDialog(QDialog):
         printer_name = config.get('receipt_printer', '')
         if not printer_name:
             QMessageBox.warning(self, "แจ้งเตือน", "ยังไม่ได้ตั้งค่าเครื่องพิมพ์ในระบบ")
+            return
+
+        # Require PIN to open drawer
+        from ui.drawer_pin_dialog import DrawerPinDialog
+        pin_dialog = DrawerPinDialog(
+            self,
+            api_url=config.get('api_url', ''),
+            pos_token=config.get('pos_token', ''),
+            cashier_code=config.get('cashier_code') or config.get('cashier_username', ''),
+            offline_auth=config.get('offline_auth'),
+            active_pin=getattr(parent_window, '_active_cashier_pin', '') if parent_window else ''
+        )
+        if pin_dialog.exec() != QDialog.Accepted:
             return
 
         try:

@@ -3,7 +3,7 @@ import os
 import io
 import time
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                               QLabel, QTableWidget, QTableWidgetItem, QHeaderView, QFrame, QAbstractItemView, QSizePolicy)
+                               QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QFrame, QAbstractItemView, QSizePolicy)
 from PySide6.QtCore import Qt, QTimer, QDateTime
 from PySide6.QtGui import QPixmap, QFont, QColor, QImage
 import qrcode
@@ -73,13 +73,34 @@ class CustomerDisplayWindow(QMainWindow):
         
         welcome_lbl = QLabel("ยินดีต้อนรับ (Welcome)")
         welcome_lbl.setStyleSheet("font-size: 30px; font-weight: 900; color: #059669; margin: 0px; padding: 0px;")
-        header_layout.addWidget(welcome_lbl, 0, Qt.AlignTop)
+        header_layout.addWidget(welcome_lbl, 0, Qt.AlignVCenter)
         
         header_layout.addStretch()
         
+        self.fullscreen_btn = QPushButton("เต็มจอ (Fullscreen)")
+        self.fullscreen_btn.setCursor(Qt.PointingHandCursor)
+        self.fullscreen_btn.setFixedHeight(34)
+        self.fullscreen_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #047857;
+                color: white;
+                border: none;
+                border-radius: 17px;
+                padding: 6px 18px;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #059669;
+            }
+        """)
+        self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
+        header_layout.addWidget(self.fullscreen_btn, 0, Qt.AlignVCenter)
+        header_layout.addSpacing(10)
+        
         self.clock_lbl = QLabel()
         self.clock_lbl.setStyleSheet("background-color: white; border: 1px solid #e2e8f0; border-radius: 15px; padding: 5px 15px; font-size: 14px; font-weight: bold; color: #334155;")
-        header_layout.addWidget(self.clock_lbl, 0, Qt.AlignTop)
+        header_layout.addWidget(self.clock_lbl, 0, Qt.AlignVCenter)
         
         main_layout.addLayout(header_layout)
 
@@ -366,3 +387,48 @@ class CustomerDisplayWindow(QMainWindow):
         self.spacer_widget.show()
         self.total_lbl.setStyleSheet("font-size: 60px; font-weight: 900; color: #10b981; border: none; font-family: Arial;")
         self.total_lbl.setText(f"{change:,.2f}")
+
+    def toggle_fullscreen(self):
+        if self.isFullScreen():
+            self.showNormal()
+            self.fullscreen_btn.setText("เต็มจอ (Fullscreen)")
+            self.fullscreen_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #047857;
+                    color: white;
+                    border: none;
+                    border-radius: 17px;
+                    padding: 6px 18px;
+                    font-size: 13px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #059669;
+                }
+            """)
+        else:
+            self.showFullScreen()
+            self.fullscreen_btn.setText("ย่อจอ (Exit Fullscreen)")
+            self.fullscreen_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #475569;
+                    color: white;
+                    border: none;
+                    border-radius: 17px;
+                    padding: 6px 18px;
+                    font-size: 13px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #334155;
+                }
+            """)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_F11:
+            self.toggle_fullscreen()
+            return
+        elif event.key() == Qt.Key_Escape and self.isFullScreen():
+            self.toggle_fullscreen()
+            return
+        super().keyPressEvent(event)

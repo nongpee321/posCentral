@@ -72,6 +72,8 @@ class MainWindow(QMainWindow):
 
         self.discount_label = ""
 
+        self._active_cashier_pin = ""
+
         self.setWindowTitle("PopCentral POS")
 
         
@@ -954,7 +956,8 @@ class MainWindow(QMainWindow):
 
     def handle_product_click(self, product):
 
-        is_scale = product.get('is_scale_item', False) if isinstance(product, dict) else getattr(product, 'is_scale_item', False)
+        from ui.scale_weight_dialog import is_scale_product
+        is_scale = is_scale_product(product)
 
         prod_name = product.get('name_th', '') if isinstance(product, dict) else getattr(product, 'name_th', '')
 
@@ -1126,7 +1129,8 @@ class MainWindow(QMainWindow):
 
                 # If product is flagged as scale/weight item but scanned via normal barcode, prompt weight
 
-                if getattr(product, 'is_scale_item', False):
+                from ui.scale_weight_dialog import is_scale_product
+                if is_scale_product(product):
 
                     weight, ok = QInputDialog.getDouble(self, "สินค้าน้ำหนัก", f"ระบุน้ำหนักสำหรับ '{product.name_th}' (กก.):", 1.0, 0.001, 999.0, 3)
 
@@ -1728,7 +1732,7 @@ class MainWindow(QMainWindow):
 
         
 
-        version_label = QLabel("v1.2.15")
+        version_label = QLabel("v1.2.16")
 
         version_label.setStyleSheet("font-size: 13px; color: #64748b; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 8px;")
 
@@ -2046,6 +2050,8 @@ class MainWindow(QMainWindow):
 
             self.logged_in_cashier = False
 
+            self._active_cashier_pin = ""
+
             self.config['cashier_name'] = ""
 
             self.config['cashier_code'] = ""
@@ -2115,6 +2121,8 @@ class MainWindow(QMainWindow):
                     self.config.pop('offline_auth', None)
 
                 self.config.pop('cashier_pin', None)
+
+                self._active_cashier_pin = getattr(dialog, 'entered_pin', '')
 
                 self.save_config()
 
@@ -2838,6 +2846,19 @@ class MainWindow(QMainWindow):
 
             return
 
+        # Prompt PIN before opening cash drawer
+        from ui.drawer_pin_dialog import DrawerPinDialog
+        pin_dialog = DrawerPinDialog(
+            self,
+            api_url=self.config.get('api_url', ''),
+            pos_token=self.config.get('pos_token', ''),
+            cashier_code=self.config.get('cashier_code') or self.config.get('cashier_username', ''),
+            offline_auth=self.config.get('offline_auth'),
+            active_pin=getattr(self, '_active_cashier_pin', '')
+        )
+        if pin_dialog.exec() != QDialog.Accepted:
+            return
+
         try:
 
             from ui.receipt_dialog import open_cash_drawer
@@ -3314,17 +3335,59 @@ class MainWindow(QMainWindow):
 
     def prompt_scale_weight_item(self):
 
-        """ปุ่มฟังก์ชันชั่งน้ำหนัก: รองรับยิงบาร์โค้ด/QR และระบุกิโลกรัมแล้วเพิ่มลงตะกร้า"""
+        """ปุ่มฟังก์ชันชั่งน้ำหนัก: รองรับยิงบาร์โค้ด/QR และระบุกิโลกรัมสำหรับสินค้าชั่งน้ำหนักเท่านั้น"""
 
-        from ui.scale_weight_dialog import ScaleWeightDialog
+        if not self.current_shift:
+            QMessageBox.warning(self, "แจ้งเตือน", "กรุณาเปิดกะก่อนเริ่มการขาย")
+            return
 
-        dialog = ScaleWeightDialog(self, db_path=self.db_path)
+        from ui.scale_weight_dialog import ScaleWeightDialog, is_scale_product
+
+        selected_indexes = self.cart_table.selectionModel().selectedRows() if self.cart_table.selectionModel() else []
+        selected_row = selected_indexes[0].row() if selected_indexes else -1
+
+        target_product = None
+        initial_weight = 1.000
+
+        if selected_row >= 0:
+            name_item = self.cart_table.item(selected_row, 0)
+            product_id = name_item.data(Qt.UserRole) if name_item else None
+            if product_id:
+                session = init_db(f'sqlite:///{self.db_path}')
+                db_product = session.query(Product).filter_by(id=product_id).first()
+                session.close()
+                if db_product:
+                    if not is_scale_product(db_product):
+                        QMessageBox.warning(
+                            self,
+                            "แจ้งเตือน",
+                            f"สินค้า '{db_product.name_th}' เป็นสินค้าขายตามจำนวนชิ้น ไม่ใช่สินค้าประเภทชั่งน้ำหนัก\n(ฟังก์ชันนี้ใช้ได้เฉพาะสินค้าชั่งน้ำหนักเท่านั้น)"
+                        )
+                        return
+                    target_product = db_product
+                    qty_item = self.cart_table.item(selected_row, 1)
+                    if qty_item:
+                        try:
+                            initial_weight = float(qty_item.text())
+                        except ValueError:
+                            initial_weight = 1.000
+
+        dialog = ScaleWeightDialog(self, db_path=self.db_path, target_product=target_product, initial_weight=initial_weight)
 
         if dialog.exec() == QDialog.Accepted:
 
             if dialog.selected_product and dialog.entered_weight > 0:
 
-                self.add_to_cart(dialog.selected_product, qty=dialog.entered_weight, is_scale=True)
+                if selected_row >= 0 and target_product and target_product.id == dialog.selected_product.id:
+                    new_qty = dialog.entered_weight
+                    price_item = self.cart_table.item(selected_row, 2)
+                    price = float(price_item.text().replace(',', '')) if price_item else (dialog.selected_product.pos_price or dialog.selected_product.default_price or 0.0)
+                    self.cart_table.item(selected_row, 1).setText(f"{new_qty:.3f}")
+                    if self.cart_table.item(selected_row, 3):
+                        self.cart_table.item(selected_row, 3).setText(f"{new_qty * price:.2f}")
+                    self.update_cart_total()
+                else:
+                    self.add_to_cart(dialog.selected_product, qty=dialog.entered_weight, is_scale=True)
 
 
 
@@ -3559,6 +3622,8 @@ class MainWindow(QMainWindow):
         self.discount_amount = 0.0
 
         self.discount_label = ""
+
+        self._active_cashier_pin = ""
 
         self.cart_table.setRowCount(0)
 

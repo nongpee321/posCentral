@@ -524,7 +524,7 @@ class SyncWorker(QThread):
 
                     stock_qty=prod_data.get('stock_qty'),
 
-                    is_scale_item=bool(prod_data.get('is_weight') or prod_data.get('is_scale_item') or False),
+                    is_scale_item=bool(prod_data.get('is_scale') or prod_data.get('is_scale_item') or prod_data.get('is_weight') or ('ชั่ง' in str(prod_data.get('name_th') or '')) or ('(กก' in str(prod_data.get('name_th') or '')) or str(prod_data.get('sku_code') or '').startswith(('800', '801')) or False),
 
                     is_promotion=bool(prod_data.get('is_promotion') or prod_data.get('is_flash_sale') or (prod_data.get('price_source') in ['promotion', 'flash_sale']))
 

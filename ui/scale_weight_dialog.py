@@ -7,22 +7,61 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 from database.models import init_db, Product
 
+def is_scale_product(product):
+    """
+    ตรวจสอบว่าสินค้าเป็นประเภทชั่งน้ำหนักหรือไม่ (สินค้าชั่งน้ำหนักเท่านั้น)
+    - มี flag is_scale_item / is_scale / is_weight
+    - หรือชื่อสินค้ามีคำว่า ชั่ง, ซั่ง, กก., กิโลกรัม
+    - หรือหน่วยเป็น กก. / kg
+    - หรือ SKU / Barcode เป็น scale PLU (800xxx, 801xxx)
+    """
+    if not product:
+        return False
+    if isinstance(product, dict):
+        if product.get('is_scale_item') or product.get('is_scale') or product.get('is_weight'):
+            return True
+        name = str(product.get('name_th') or '')
+        sku = str(product.get('sku_code') or '')
+        barcode = str(product.get('barcode') or '')
+        unit = str(product.get('unit') or product.get('unit_name') or '')
+    else:
+        if getattr(product, 'is_scale_item', False) or getattr(product, 'is_scale', False) or getattr(product, 'is_weight', False):
+            return True
+        name = str(getattr(product, 'name_th', '') or '')
+        sku = str(getattr(product, 'sku_code', '') or '')
+        barcode = str(getattr(product, 'barcode', '') or '')
+        unit = str(getattr(product, 'unit', '') or getattr(product, 'unit_name', '') or '')
+        
+    combined = f"{name} {sku} {barcode}".lower()
+    if 'ชั่ง' in combined or 'ซั่ง' in combined:
+        return True
+    if '(กก.)' in combined or '(กก)' in combined or 'กก.' in combined or 'กิโลกรัม' in combined:
+        return True
+    if unit in ['กก.', 'กก', 'kg', 'KG', 'กิโลกรัม']:
+        return True
+    if sku.startswith('800') or sku.startswith('801') or (len(sku) == 6 and sku.startswith('80')):
+        return True
+    return False
+
 class ScaleWeightDialog(QDialog):
     """
     หน้าต่างสินค้าชั่งน้ำหนัก:
-    - รองรับการยิงบาร์โค้ด / สแกน QR สินค้า
-    - หรือค้นหา / เลือกจากรายชื่อสินค้า
+    - กรองและแสดงเฉพาะสินค้าชั่งน้ำหนักอย่างเดียว
+    - รองรับการยิงบาร์โค้ด / สแกน QR สินค้าชั่งน้ำหนัก
+    - หรือค้นหา / เลือกจากรายชื่อสินค้าชั่งน้ำหนัก
     - ใส่จำนวนกิโลกรัม (กก.) ทศนิยม 3 ตำแหน่ง
     - คำนวณราคาและส่งเข้าตะกร้าสินค้า
     """
-    def __init__(self, parent=None, db_path="pos.db"):
+    def __init__(self, parent=None, db_path="pos.db", target_product=None, initial_weight=1.000):
         super().__init__(parent)
         self.parent_window = parent
         self.db_path = db_path
-        self.selected_product = None
-        self.entered_weight = 1.000
+        self.target_product = target_product
+        self.selected_product = target_product if (target_product and is_scale_product(target_product)) else None
+        self.entered_weight = max(0.001, float(initial_weight or 1.000))
+        self.products_list = []
         
-        self.setWindowTitle("สินค้าชั่งน้ำหนัก (สแกนบาร์โค้ด/QR และระบุกิโลกรัม)")
+        self.setWindowTitle("สินค้าชั่งน้ำหนัก (ระบุกิโลกรัม)")
         self.setFixedWidth(450)
         self.setStyleSheet("""
             QDialog { background-color: #f8fafc; font-family: 'Segoe UI', Tahoma, sans-serif; }
@@ -68,6 +107,10 @@ class ScaleWeightDialog(QDialog):
         
         self.setup_ui()
         self.load_products()
+        if self.selected_product:
+            self.select_product(self.selected_product)
+            self.weight_input.setValue(self.entered_weight)
+            self.update_product_info()
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -83,7 +126,7 @@ class ScaleWeightDialog(QDialog):
         
         title_lbl = QLabel("ขายสินค้าชั่งน้ำหนัก (กิโลกรัม)")
         title_lbl.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
-        sub_lbl = QLabel("ยิงบาร์โค้ด / QR สินค้า หรือเลือกรายการ แล้วระบุกิโลกรัม")
+        sub_lbl = QLabel("เฉพาะสินค้าประเภทชั่งน้ำหนักเท่านั้น ระบุกิโลกรัม")
         sub_lbl.setStyleSheet("color: #ccfbf1; font-size: 12px;")
         h_layout.addWidget(title_lbl)
         h_layout.addWidget(sub_lbl)
@@ -96,7 +139,7 @@ class ScaleWeightDialog(QDialog):
         scan_lbl.setStyleSheet("font-weight: bold; font-size: 13px; color: #0f766e;")
         self.scan_input = QLineEdit()
         self.scan_input.setFixedHeight(38)
-        self.scan_input.setPlaceholderText("ยิงบาร์โค้ด / QR หรือ SKU แล้วกด Enter...")
+        self.scan_input.setPlaceholderText("ยิงบาร์โค้ด / QR หรือ SKU สินค้าชั่งน้ำหนัก...")
         self.scan_input.setStyleSheet("border: 2px dashed #0d9488; background: #f0fdfa; font-weight: bold; font-size: 14px; padding: 4px 8px;")
         self.scan_input.returnPressed.connect(self.on_scan_barcode)
         scan_box.addWidget(scan_lbl)
@@ -106,7 +149,7 @@ class ScaleWeightDialog(QDialog):
         # 2. Product Selector Dropdown
         prod_box = QVBoxLayout()
         prod_box.setSpacing(4)
-        prod_lbl = QLabel("หรือเลือกสินค้าจากรายการ:")
+        prod_lbl = QLabel("หรือเลือกสินค้าชั่งน้ำหนักจากรายการ:")
         prod_lbl.setStyleSheet("font-weight: bold; font-size: 13px; color: #334155;")
         self.prod_combo = QComboBox()
         self.prod_combo.setFixedHeight(38)
@@ -122,7 +165,7 @@ class ScaleWeightDialog(QDialog):
         self.info_card.setStyleSheet("background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 10px;")
         info_layout = QHBoxLayout(self.info_card)
         info_layout.setContentsMargins(8, 4, 8, 4)
-        self.prod_name_lbl = QLabel("กรุณาเลือกหรือสแกนสินค้า")
+        self.prod_name_lbl = QLabel("กรุณาเลือกหรือสแกนสินค้าชั่งน้ำหนัก")
         self.prod_name_lbl.setStyleSheet("font-weight: bold; font-size: 14px; color: #0f172a;")
         self.prod_price_lbl = QLabel("฿0.00 / กก.")
         self.prod_price_lbl.setStyleSheet("font-weight: bold; font-size: 15px; color: #b91c1c;")
@@ -141,13 +184,12 @@ class ScaleWeightDialog(QDialog):
         self.weight_input.setDecimals(3)
         self.weight_input.setRange(0.001, 999.000)
         self.weight_input.setSingleStep(0.100)
-        self.weight_input.setValue(1.000)
+        self.weight_input.setValue(self.entered_weight)
         self.weight_input.setStyleSheet("font-size: 20px; font-weight: bold; color: #0f172a; height: 44px; padding: 4px 8px;")
         self.weight_input.valueChanged.connect(self.update_calc_total)
         
         kg_unit_lbl = QLabel("กก. (kg)")
         kg_unit_lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #475569;")
-        
         weight_row.addWidget(self.weight_input, 1)
         weight_row.addWidget(kg_unit_lbl)
         weight_box.addWidget(weight_lbl)
@@ -194,22 +236,37 @@ class ScaleWeightDialog(QDialog):
             if not products:
                 return
 
-            def sort_key(p):
-                name = (p.name_th or '').lower()
-                is_sc = getattr(p, 'is_scale_item', False) or ('กก' in name) or ('ชั่ง' in name) or ('สด' in name) or ('กิโล' in name)
-                return (0 if is_sc else 1, p.name_th or '')
+            # กรองเฉพาะสินค้าชั่งน้ำหนักอย่างเดียว
+            self.products_list = [p for p in products if is_scale_product(p)]
+            self.products_list.sort(key=lambda p: (p.name_th or '').lower())
 
-            self.products_list = sorted(products, key=sort_key)
             self.prod_combo.clear()
+            if not self.products_list:
+                self.prod_combo.addItem("ไม่มีสินค้าประเภทชั่งน้ำหนักในระบบ", None)
+                self.selected_product = None
+                self.update_product_info()
+                return
+
             for p in self.products_list:
                 price = p.pos_price or p.default_price or 0.0
                 self.prod_combo.addItem(f"{p.sku_code} - {p.name_th} (฿{price:,.2f}/กก.)", p.id)
 
-            if self.products_list:
+            if not self.selected_product and self.products_list:
                 self.selected_product = self.products_list[0]
                 self.update_product_info()
         finally:
             session.close()
+
+    def select_product(self, prod):
+        if not prod:
+            return
+        prod_id = prod.get('id') if isinstance(prod, dict) else getattr(prod, 'id', None)
+        for i in range(self.prod_combo.count()):
+            if self.prod_combo.itemData(i) == prod_id:
+                self.prod_combo.setCurrentIndex(i)
+                break
+        self.selected_product = prod
+        self.update_product_info()
 
     def on_product_combo_changed(self, idx):
         if hasattr(self, 'products_list') and 0 <= idx < len(self.products_list):
@@ -218,7 +275,7 @@ class ScaleWeightDialog(QDialog):
 
     def update_product_info(self):
         if not self.selected_product:
-            self.prod_name_lbl.setText("ไม่พบสินค้า")
+            self.prod_name_lbl.setText("ไม่พบสินค้าชั่งน้ำหนัก")
             self.prod_price_lbl.setText("฿0.00 / กก.")
             self.update_calc_total()
             return
@@ -244,7 +301,6 @@ class ScaleWeightDialog(QDialog):
             
         session = init_db(f"sqlite:///{self.db_path}")
         try:
-            # 1. ลองค้นหาตรงตาม Barcode หรือ SKU
             prod = session.query(Product).filter(
                 (Product.barcode == code) | 
                 (Product.sku_code == code) |
@@ -252,13 +308,17 @@ class ScaleWeightDialog(QDialog):
             ).first()
             
             if prod:
-                self.selected_product = prod
-                # เลื่อน combo ให้ตรง
-                for i in range(self.prod_combo.count()):
-                    if self.prod_combo.itemData(i) == prod.id:
-                        self.prod_combo.setCurrentIndex(i)
-                        break
-                self.update_product_info()
+                # ตรวจสอบว่าสินค้าเป็นประเภทชั่งน้ำหนักหรือไม่
+                if not is_scale_product(prod):
+                    QMessageBox.warning(
+                        self, 
+                        "แจ้งเตือน", 
+                        f"สินค้า '{prod.name_th}' เป็นสินค้าขายตามจำนวนชิ้น ไม่ใช่สินค้าประเภทชั่งน้ำหนัก\n(ฟังก์ชันนี้ใช้ได้เฉพาะสินค้าชั่งน้ำหนักเท่านั้น)"
+                    )
+                    self.scan_input.selectAll()
+                    return
+
+                self.select_product(prod)
                 self.scan_input.clear()
                 # Focus ไปที่ช่องใส่น้ำหนัก
                 self.weight_input.setFocus()
@@ -271,9 +331,13 @@ class ScaleWeightDialog(QDialog):
 
     def on_submit(self):
         if not self.selected_product:
-            QMessageBox.warning(self, "แจ้งเตือน", "กรุณาเลือกสินค้าก่อนบันทึก")
+            QMessageBox.warning(self, "แจ้งเตือน", "กรุณาเลือกสินค้าประเภทชั่งน้ำหนักก่อนบันทึก")
             return
             
+        if not is_scale_product(self.selected_product):
+            QMessageBox.warning(self, "แจ้งเตือน", "สินค้าที่เลือกไม่ใช่สินค้าประเภทชั่งน้ำหนัก")
+            return
+
         weight = float(self.weight_input.value())
         if weight <= 0:
             QMessageBox.warning(self, "แจ้งเตือน", "กรุณาระบุน้ำหนักที่ถูกต้อง (มากกว่า 0)")
