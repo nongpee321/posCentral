@@ -275,6 +275,7 @@ class DiscountDialog(QDialog):
                 background-color: #1e40af;
             }
         """)
+        self.btn_ok.setDefault(True)
         self.btn_ok.clicked.connect(self.on_confirm)
         btn_row.addWidget(self.btn_ok, 2)
 
@@ -283,6 +284,7 @@ class DiscountDialog(QDialog):
         # Signal connections
         self.btn_group.idClicked.connect(self.on_mode_changed)
         self.val_input.textChanged.connect(self.on_text_changed)
+        self.val_input.returnPressed.connect(self.on_confirm)
 
         # Set initial mode
         if self.discount_label.endswith("%"):

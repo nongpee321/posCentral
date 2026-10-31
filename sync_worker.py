@@ -945,10 +945,13 @@ class SyncWorker(QThread):
                 # Auto-heal discount and items if bill had discount or was rejected by manager approval / pricing / shortfall
                 sale_total = float(sale.total_amount if sale else (payload.get('cash_received') or 0.0))
                 payload_items = payload.get('items') or []
+                gross_sum_raw = sum(float(i.get('qty', 0) or 0) * float(i.get('unit_price', 0) or 0) for i in payload_items)
+                has_price_reduction = (sale_total > 0 and gross_sum_raw > sale_total + 0.01)
                 needs_discount_healing = (
                     payload_items
                     and (
-                        payload.get('manual_discount_amount', 0) > 0
+                        has_price_reduction
+                        or payload.get('manual_discount_amount', 0) > 0
                         or payload.get('discount_amount', 0) > 0
                         or (sale and getattr(sale, 'discount_amount', 0.0) and float(sale.discount_amount) > 0)
                         or (entry.last_error and any(err in entry.last_error for err in ('ส่วนลดพิเศษ', 'สิทธิ์อนุมัติ', 'ไม่ครบ', 'ราคาหรือส่วนลดเปลี่ยน')))

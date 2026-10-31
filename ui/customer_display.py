@@ -388,16 +388,31 @@ class CustomerDisplayWindow(QMainWindow):
         pixmap.loadFromData(buf.getvalue())
         return pixmap
 
-    def show_payment(self, method="QR", override_amount=None):
+    def show_payment(self, method="QR", override_amount=None, discount=None):
         if isinstance(method, (int, float)):
             override_amount = float(method)
             method = "QR"
+        amt = float(override_amount if override_amount is not None else self.current_total)
+        self.current_total = amt
+        self.total_lbl.setText(f"{amt:,.2f}")
+
+        if discount is not None:
+            self.disc_lbl.setText(f"{float(discount):,.2f} ฿")
+
+        if amt > 0:
+            sub = amt / 1.07
+            vat = amt - sub
+            self.subtotal_lbl.setText(f"{sub:,.2f} ฿")
+            self.vat_lbl.setText(f"{vat:,.2f} ฿")
+        else:
+            self.subtotal_lbl.setText("0.00 ฿")
+            self.vat_lbl.setText("0.00 ฿")
+
         if method == "QR":
             try:
-                amt = override_amount if override_amount is not None else self.current_total
                 pixmap = self.generate_qr_image(amt)
                 self.qr_image.setPixmap(pixmap)
-                self.qr_timer_lbl.setText("กำลังสร้าง QR Code...")
+                self.qr_timer_lbl.setText("พร้อมเพย์ (PromptPay)")
             except Exception as e:
                 print(e)
             self.spacer_widget.hide()

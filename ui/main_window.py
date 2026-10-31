@@ -1732,7 +1732,7 @@ class MainWindow(QMainWindow):
 
         
 
-        version_label = QLabel("v1.2.19")
+        version_label = QLabel("v1.2.20")
 
         version_label.setStyleSheet("font-size: 13px; color: #64748b; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 8px;")
 
@@ -4129,23 +4129,16 @@ class MainWindow(QMainWindow):
             
 
             from ui.payment_dialog import PaymentDialog
-
             from ui.help_dialog import HelpDialog
-
             dialog = PaymentDialog(self, grand_total, total_items, total_qty, discount_amount=discount)
-
             
-
             if hasattr(self, 'customer_display') and self.customer_display and not self.customer_display.isHidden():
-
-                self.customer_display.show_payment("QR", override_amount=grand_total)
-
+                self.customer_display.show_payment("QR", override_amount=grand_total, discount=discount)
                 
-
             if dialog.exec() == QDialog.Accepted:
-
+                if hasattr(dialog, 'discount_amount'):
+                    self.discount_amount = float(dialog.discount_amount or 0.0)
                 if hasattr(self, 'customer_display') and self.customer_display and not self.customer_display.isHidden():
-
                     self.customer_display.show_payment("SUCCESS")
 
                     
@@ -4354,20 +4347,33 @@ class MainWindow(QMainWindow):
 
 
 
+            # Calculate standard catalog gross sum and ensure standard catalog prices for ERP
+            catalog_gross_sum = 0.0
+            sync_items = []
+            for it in api_items:
+                pid = it.get('product_id')
+                p_qty = float(it.get('qty') or 0.0)
+                p_price = float(it.get('unit_price') or 0.0)
+                std_price = p_price
+                if pid:
+                    db_p = session.query(Product).filter_by(id=pid).first()
+                    if db_p:
+                        std_price = float(db_p.pos_price or db_p.default_price or p_price)
+                catalog_gross_sum += p_qty * std_price
+                sync_items.append({
+                    "product_id": pid,
+                    "qty": p_qty,
+                    "unit_price": std_price
+                })
+
             totals = self._compute_rounded_totals(total_amount)
-
+            catalog_reduction = max(0.0, round(catalog_gross_sum - total_amount, 2)) if total_amount > 0 and catalog_gross_sum > total_amount else 0.0
             manual_discount = totals['manual_discount']
-
             satang_discount = totals['satang_discount']
-
-            discount_applied = totals['total_discount']
-
+            discount_applied = round(totals['total_discount'] + catalog_reduction, 2)
             net_total = totals['grand_total']
 
             idempotency_key = f"offline-receipt-{receipt_id}"
-
-            # Keep items with standard catalog unit prices so PosPricingGuard passes with 0 discrepancy
-            sync_items = list(api_items)
 
             # Prepare checkout payment fields for ERP validation
             cash_received_payload = received_amount

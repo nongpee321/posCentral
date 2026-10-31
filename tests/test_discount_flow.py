@@ -96,3 +96,32 @@ def test_sale_model_persists_discount(tmp_path):
     assert loaded.total_amount == 600.0
     assert loaded.discount_amount == 50.0
     session.close()
+
+def test_payment_dialog_discount_support(qtbot):
+    from ui.payment_dialog import PaymentDialog
+    dlg = PaymentDialog(total_amount=650.0, total_items=1, total_qty=1.0, discount_amount=0.0)
+    qtbot.addWidget(dlg)
+
+    assert dlg.total_amount == 650.0
+    assert dlg.subtotal == 650.0
+    assert dlg.btn_discount_dialog is not None
+
+    # Apply 50 baht discount directly
+    dlg.discount_amount = 50.0
+    dlg.total_amount = 600.0
+    dlg.update_summary_card()
+
+    assert dlg.total_amount == 600.0
+    assert "600.00" in dlg.total_lbl.text()
+
+def test_customer_display_show_payment_updates_discount_and_total(qtbot):
+    cd = CustomerDisplayWindow()
+    qtbot.addWidget(cd)
+
+    cd.show_payment("QR", override_amount=595.0, discount=55.0)
+    assert cd.total_lbl.text() == "595.00"
+    assert cd.disc_lbl.text() == "55.00 ฿"
+    assert "556.07 ฿" in cd.subtotal_lbl.text()
+    assert "38.93 ฿" in cd.vat_lbl.text()
+    assert not cd.qr_box.isHidden()
+

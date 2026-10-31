@@ -53,11 +53,12 @@ class PaymentDialog(QDialog):
     def __init__(self, parent=None, total_amount=0.0, total_items=0, total_qty=0.0, discount_amount=0.0):
         super().__init__(parent)
         self.setWindowTitle("รับชำระเงิน")
-        self.setFixedSize(850, 600)
+        self.setFixedSize(850, 620)
         self.setStyleSheet("background-color: white; color: #111827;")
         
-        self.discount_amount = discount_amount
-        self.total_amount = total_amount
+        self.discount_amount = float(discount_amount or 0.0)
+        self.total_amount = float(total_amount or 0.0)
+        self.subtotal = float(total_amount or 0.0) + self.discount_amount
         self.total_items = total_items
         self.total_qty = total_qty
         
@@ -79,6 +80,7 @@ class PaymentDialog(QDialog):
         self.idle_timer.start(1000)
         
         self.init_ui()
+        self.update_summary_card()
         self.update_displays()
         
     def init_ui(self):
@@ -120,33 +122,31 @@ class PaymentDialog(QDialog):
 
         
         # Summary Card
-        summary_card = QFrame()
-        summary_card.setStyleSheet("background-color: white; border-radius: 12px; border: 1px solid #e5e7eb;")
-        summary_layout = QVBoxLayout(summary_card)
-        summary_layout.setSpacing(10)
-        
-        def add_summary_row(label, value):
-            row = QHBoxLayout()
-            lbl = QLabel(label)
-            lbl.setStyleSheet("font-size: 14px; color: #374151; font-weight: bold; border: none;")
-            val = QLabel(str(value))
-            val.setStyleSheet("font-size: 14px; color: #111827; font-weight: bold; border: none;")
-            row.addWidget(lbl)
-            row.addStretch()
-            row.addWidget(val)
-            summary_layout.addLayout(row)
-            
-        add_summary_row("จำนวนรายการ", f"{self.total_items}")
-        add_summary_row("จำนวนชิ้น", f"{self.total_qty:g}")
-        if self.discount_amount > 0:
-            add_summary_row("ส่วนลด", f"-฿{self.discount_amount:,.2f}")
-        
-        total_lbl = QLabel(f"฿ {self.total_amount:,.2f}")
-        total_lbl.setStyleSheet("font-size: 32px; font-weight: bold; color: #10b981; margin-top: 10px; border: none;")
-        total_lbl.setAlignment(Qt.AlignCenter)
-        summary_layout.addWidget(total_lbl)
-        
-        left_layout.addWidget(summary_card)
+        self.summary_card = QFrame()
+        self.summary_card.setStyleSheet("background-color: white; border-radius: 12px; border: 1px solid #e5e7eb;")
+        self.summary_layout = QVBoxLayout(self.summary_card)
+        self.summary_layout.setSpacing(8)
+
+        # Action button to add / edit discount inside payment dialog
+        self.btn_discount_dialog = QPushButton("ใส่ / แก้ไขส่วนลดบิล")
+        self.btn_discount_dialog.setFixedHeight(38)
+        self.btn_discount_dialog.setStyleSheet("""
+            QPushButton {
+                background-color: #f59e0b;
+                color: white;
+                border-radius: 6px;
+                font-size: 13.5px;
+                font-weight: bold;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #d97706;
+            }
+        """)
+        self.btn_discount_dialog.clicked.connect(self.prompt_discount)
+
+        left_layout.addWidget(self.summary_card)
+        left_layout.addWidget(self.btn_discount_dialog)
         left_layout.addStretch()
         main_layout.addWidget(left_panel)
         
@@ -258,6 +258,56 @@ class PaymentDialog(QDialog):
                 self.clear_cart_requested = True
                 self.reject()
 
+    def update_summary_card(self):
+        while self.summary_layout.count():
+            item = self.summary_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+            elif item.layout():
+                sub_l = item.layout()
+                while sub_l.count():
+                    sub_item = sub_l.takeAt(0)
+                    if sub_item.widget():
+                        sub_item.widget().deleteLater()
+
+        def add_summary_row(label, value, is_discount=False):
+            row = QHBoxLayout()
+            lbl = QLabel(label)
+            lbl.setStyleSheet(f"font-size: 14px; color: {'#059669' if is_discount else '#374151'}; font-weight: bold; border: none;")
+            val = QLabel(str(value))
+            val.setStyleSheet(f"font-size: 14px; color: {'#10b981' if is_discount else '#111827'}; font-weight: bold; border: none;")
+            row.addWidget(lbl)
+            row.addStretch()
+            row.addWidget(val)
+            self.summary_layout.addLayout(row)
+
+        add_summary_row("จำนวนรายการ", f"{self.total_items}")
+        add_summary_row("จำนวนชิ้น", f"{self.total_qty:g}")
+        if self.subtotal > self.total_amount or self.discount_amount > 0:
+            add_summary_row("ยอดรวมเดิม", f"฿{self.subtotal:,.2f}")
+            add_summary_row("ส่วนลด", f"-฿{self.discount_amount:,.2f}", is_discount=True)
+
+        self.total_lbl = QLabel(f"฿ {self.total_amount:,.2f}")
+        self.total_lbl.setStyleSheet("font-size: 32px; font-weight: bold; color: #10b981; margin-top: 6px; border: none;")
+        self.total_lbl.setAlignment(Qt.AlignCenter)
+        self.summary_layout.addWidget(self.total_lbl)
+
+    def prompt_discount(self):
+        from ui.discount_dialog import DiscountDialog
+        cur_label = getattr(self.parent(), 'discount_label', '') if self.parent() else ''
+        dlg = DiscountDialog(self, subtotal=self.subtotal, current_discount=self.discount_amount, current_label=cur_label)
+        if dlg.exec() == QDialog.Accepted:
+            self.discount_amount = dlg.discount_amount
+            self.total_amount = max(0.0, round(self.subtotal - self.discount_amount, 2))
+            if self.parent():
+                self.parent().discount_amount = self.discount_amount
+                self.parent().discount_label = dlg.discount_label
+                if hasattr(self.parent(), 'update_cart_total'):
+                    self.parent().update_cart_total()
+            self.update_summary_card()
+            self.set_method(self.selected_method)
+
     def set_method(self, method):
         for m, btn in self.method_btns.items():
             btn.setChecked(m == method)
@@ -267,7 +317,7 @@ class PaymentDialog(QDialog):
         self.title_lbl.setText(f"ยอดรับชำระ: {method}")
         parent_window = self.parent()
         if parent_window and getattr(parent_window, "customer_display", None) and not parent_window.customer_display.isHidden():
-            parent_window.customer_display.show_payment(method)
+            parent_window.customer_display.show_payment(method, override_amount=self.total_amount, discount=self.discount_amount)
         
         if method == "QR":
             self.keypad_widget.hide()
