@@ -1,4 +1,4 @@
-# PopCentral POS (v1.2.12)
+# PopCentral POS (v1.2.15)
 
 ระบบจุดขายหน้าร้านระดับพาณิชย์ (Commercial Desktop POS) พัฒนาด้วย **Python (PySide6 / Qt6)** และ **SQLAlchemy (SQLite)** ออกแบบตามสถาปัตยกรรม **Local-First & Offline-First** สามารถเปิดบิล ขายสินค้า ชั่งน้ำหนัก พิมพ์ใบเสร็จ และรับชำระเงินได้ตลอดเวลาแม้ไม่มีสัญญาณอินเทอร์เน็ต พร้อมระบบ Background Sync อัตโนมัติที่เชื่อมต่อกับ **PopStar ERP Backend**
 
@@ -10,9 +10,13 @@
 - **Auto Background Synchronization**: ระบบ Worker คอยตรวจสอบสัญญาณอินเทอร์เน็ตและส่งข้อมูลบิลขาย (Outbox Queue) เข้า ERP เซิร์ฟเวอร์แบบ Real-time พร้อมระบบป้องกันบิลซ้ำ (Idempotency Key)
 - **เครื่องชั่งน้ำหนักและบาร์โค้ดสินค้าสด (Scale Integration)**: รองรับการอ่านบาร์โค้ดเครื่องชั่งทั้งแบบ Prefix ในร้าน (`800`, `801`, `02`, `20`) และ EAN-13 มาตรฐาน พร้อมระบบแปลงน้ำหนักและราคาอัตโนมัติ
 - **ระบบรับชำระเงินครบวงจร (Multi-payment)**:
-  - รับเงินสด (Cash) พร้อมปุ่มคีย์ลัด และคำนวณเงินทอนอัตโนมัติ
-  - สแกน QR PromptPay พร้อมระบบสร้าง QR Code ตามยอดเงินจริง
-  - บัตรเครดิต และการชำระเงินแบบผสม (Split Payment)
+  - รับเงินสด (Cash) พร้อมคำนวณเงินทอนอัตโนมัติ
+  - สแกน QR PromptPay พร้อมระบบสร้าง Dynamic QR ตามยอดเงินจริง
+  - บัตรเครดิต และการชำระเงินแบบผสม (Split Payment: เงินสด + โอน)
+  - ระบบส่วนลดท้ายบิลและส่วนลดสินค้า คำนวณยอดสุทธิและเงินทอนแม่นยำ
+- **ระบบความปลอดภัยแคชเชียร์ (PIN Authentication)**:
+  - เข้าใช้งานด้วยรหัส PIN รวดเร็ว ปลอดภัย ไม่ต้องพิมพ์รหัสผ่านยาว
+  - จดจำชื่อผู้ใช้ล่าสุดและโฟกัสช่องกรอก PIN ทันที
 - **การจัดการกะและรายงาน (Shift & Cash Management)**:
   - บันทึกเงินทอนเริ่มต้นกะ (Opening Cash)
   - รายงานสรุปยอดขายประจำวันและสรุปกะ (Z-Report)
@@ -21,9 +25,8 @@
   - รองรับเครื่องพิมพ์ความร้อน 80mm และ 58mm (ESC/POS, Windows Driver)
   - หน้าต่างตั้งค่าเครื่องพิมพ์พร้อมระบบแสดงตัวอย่างใบเสร็จสด (Live Preview)
   - ปรับขนาดตัวอักษรใบเสร็จได้ (มาตรฐาน / ตัวใหญ่ ชัดเจน)
-- **ปลอดภัยและเสถียร (Enterprise Stability)**:
-  - ไม่มี Emoji กวนสายตาบนหน้าต่างหลักและป๊อปอัพ
-  - ระบบสำรองฐานข้อมูลอัตโนมัติทุกวันเมื่อเริ่มโปรแกรม
+- **ระบบสำรองข้อมูลอัตโนมัติ (Auto Backup)**:
+  - สำรองฐานข้อมูล SQLite อัตโนมัติทุกวันเมื่อเริ่มโปรแกรม ป้องกันเหตุฉุกเฉิน
 
 ---
 
@@ -35,148 +38,114 @@
 | **หน่วยประมวลผล (CPU)** | Intel Core i3 / AMD Ryzen 3 | Intel Core i5 หรือเทียบเท่า |
 | **หน่วยความจำ (RAM)** | 4 GB | 8 GB ขึ้นไป |
 | **พื้นที่ว่างบนฮาร์ดดิสก์** | 500 MB | 2 GB ขึ้นไป (SSD) |
-| **Python** | Python 3.10 ขึ้นไป | Python 3.12 / 3.14 (64-bit) |
 | **เครื่องพิมพ์ใบเสร็จ** | Thermal Printer 58mm / 80mm | Xprinter, Epson, POS-80 |
 
 ---
 
-## ขั้นตอนการติดตั้งและใช้งาน (Installation Guide)
+## คู่มือและวิธีติดตั้งโปรแกรม (Installation Guide)
 
-### วิธีที่ 1: ติดตั้งจาก Source Code (สำหรับ Developer / Admin)
+สามารถดาวน์โหลดตัวติดตั้งล่าสุดได้จากเมนู [Releases (v1.2.15)](https://github.com/nongpee321/posCentral/releases/tag/v1.2.15)
 
-#### 1. ติดตั้ง Python และ Git
-ดาวน์โหลดและติดตั้ง:
-- [Python 3.12+ (Windows 64-bit)](https://www.python.org/downloads/) *(ต้องติ๊กเลือก "Add Python to PATH" ตอนติดตั้ง)*
-- [Git for Windows](https://git-scm.com/)
+### ตัวเลือกที่ 1: ติดตั้งแบบตัวติดตั้งอัตโนมัติ (.exe Setup) — แนะนำสำหรับเครื่องหน้าร้าน
 
-#### 2. Clone Repository
-เปิด **PowerShell** หรือ **Command Prompt** แล้วรันคำสั่ง:
+1. ดาวน์โหลดไฟล์ `PopCentral-POS-UAT-1.2.15-setup.exe`
+2. ดับเบิลคลิกเปิดไฟล์ติดตั้ง
+3. เลือกตำแหน่งติดตั้ง (ค่าเริ่มต้น: `C:\PopCentral POS` หรือ `D:\PopCentral POS`)
+4. กดปุ่ม **Extract** หรือ **ติดตั้ง**
+5. ตัวติดตั้งจะวางไฟล์ระบบและสร้างทางลัดไอคอน **PopCentral POS** บนหน้าจอ Desktop ให้ทันที
+
+### ตัวเลือกที่ 2: ใช้งานแบบ Portable (.zip ไม่ต้องติดตั้ง)
+
+1. ดาวน์โหลดไฟล์ `PopCentral-POS-Central-UAT-1.2.15-portable.zip`
+2. คลิกขวาที่ไฟล์ `.zip` แล้วเลือก **Extract All... (แตกไฟล์ทั้งหมด)** ไปยังโฟลเดอร์ที่ต้องการ เช่น `D:\PopCentral-POS-Central-UAT`
+3. ดับเบิลคลิกไฟล์ `PopCentral-POS-Central-UAT.exe` เพื่อเปิดใช้งานได้ทันที
+
+---
+
+## ขั้นตอนการเริ่มใช้งานและตั้งค่าครั้งแรก (Step-by-Step Setup)
+
+### ขั้นตอนที่ 1: ลงทะเบียนเชื่อมต่อเครื่องจุดขายกับระบบ ERP (First-time Device Token Setup)
+
+เมื่อเปิดโปรแกรมครั้งแรกบนเครื่องใหม่ ระบบจะเปิดหน้าต่าง **ลงทะเบียนเครื่องจุดขาย (POS Terminal Setup)**:
+
+![ขั้นตอนที่ 1: เชื่อมต่อเครื่อง POS กับ ERP](assets/manual/install_step1_token.png)
+
+1. **รหัสเครื่องจุดขาย (Device Token)**: นำรหัส Token ที่ได้รับจากผู้ดูแลระบบ ERP สำหรับเครื่องสาขานั้นๆ มาวางลงในช่องนี้
+2. **ชื่อผู้ใช้งาน (Username)**: ใส่ชื่อผู้ใช้แคชเชียร์ เช่น `Pee`
+3. **รหัส PIN แคชเชียร์**: ใส่รหัส PIN ตัวเลข 4-6 หลัก
+4. กดปุ่ม **"เข้าสู่ระบบ"** (หรือกดปุ่ม "ตั้งค่า ERP" หากต้องการระบุ Server URL เช่น `https://erp.popstarcenter.com`)
+5. ระบบจะดึงฐานข้อมูลสินค้า สาขา และโปรโมชั่นจาก ERP ลงสู่เครื่องโดยอัตโนมัติ
+
+---
+
+### ขั้นตอนที่ 2: การเข้าสู่ระบบแคชเชียร์ประจำวัน (Cashier PIN Login)
+
+สำหรับการเข้างานประจำวันหรือสลับกะพนักงาน:
+
+![ขั้นตอนที่ 2: เข้าสู่ระบบด้วยรหัส PIN](assets/manual/install_step2_login.png)
+
+1. ระบบจะจำชื่อผู้ใช้งานหรือรหัสพนักงานเดิมให้อัตโนมัติ
+2. กรอก **รหัส PIN แคชเชียร์** (เช่น `1234` หรือ `0000`)
+3. กดปุ่ม **"เข้าสู่ระบบ"** (หรือกดปุ่ม `Enter` บนคีย์บอร์ด)
+
+---
+
+### ขั้นตอนที่ 3: เปิดกะขายและบันทึกเงินทอนเริ่มต้น (Open Shift)
+
+ก่อนเริ่มคิดเงินบิลแรกของวัน แคชเชียร์ต้องทำการเปิดกะ:
+
+![ขั้นตอนที่ 3: เปิดกะขายสินค้า](assets/manual/install_step3_shift.png)
+
+1. ตรวจสอบชื่อสาขาและชื่อแคชเชียร์ให้ถูกต้อง
+2. ระบุยอด **เงินทอนเริ่มต้น** ในลิ้นชัก (เช่น `1000` บาท หรือ `0` หากไม่มีเงินทอน)
+3. ใส่หมายเหตุเปิดกะ (ถ้ามี)
+4. กดปุ่ม **"เปิดกะ"** เพื่อเริ่มขายสินค้าทันที
+
+---
+
+### ขั้นตอนที่ 4: หน้าต่างขายสินค้าและคิดเงิน (POS Main Screen)
+
+เมื่อเปิดกะเรียบร้อย ระบบจะเข้าสู่หน้าต่างการขายหลัก:
+
+![ขั้นตอนที่ 4: หน้าจอขายสินค้าหลัก](assets/manual/pos.png)
+
+1. **ค้นหาและสแกนสินค้า**: ยิงบาร์โค้ดสินค้า ป้ายชั่งน้ำหนัก หรือคลิกเลือกสินค้าตามหมวดหมู่
+2. **ตะกร้าสินค้า (ขวา)**: ตรวจสอบรายการ จำนวน และราคา รวมทั้งกดปุ่มใส่ส่วนลดบิล
+3. **รับชำระเงิน**: กดปุ่ม **"คิดเงิน / ชำระเงิน"** เพื่อเลือกวิธีชำระ (เงินสด / QR Code / เงินสด+โอน)
+4. ระบบจะบันทึกบิลลงเครื่อง พิมพ์ใบเสร็จความร้อน ลิ้นชักเด้ง และซิงก์ข้อมูลขึ้นระบบ ERP โดยอัตโนมัติ
+
+---
+
+## วิธีติดตั้งจาก Source Code (สำหรับ Developer)
+
 ```bash
+# 1. Clone repository
 git clone https://github.com/nongpee321/posCentral.git
 cd posCentral
-```
 
-#### 3. สร้าง Virtual Environment
-```bash
+# 2. สร้างและเปิดใช้งาน venv
 python -m venv venv
-```
+.\venv\Scripts\Activate.ps1
 
-#### 4. เปิดใช้งาน Virtual Environment
-- **Command Prompt (cmd)**:
-  ```cmd
-  venv\Scripts\activate.bat
-  ```
-- **PowerShell**:
-  ```powershell
-  .\venv\Scripts\Activate.ps1
-  ```
-  *(หากติดสิทธิ์ Execution Policy ให้รัน `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` ก่อน)*
-
-#### 5. ติดตั้ง Dependencies
-```bash
-pip install --upgrade pip
+# 3. ติดตั้งไลบรารี
 pip install -r requirements.txt
-```
-*(หากต้องการรัน Unit Test หรือ Build ให้ติดตั้ง: `pip install -r requirements-dev.txt`)*
+pip install -r requirements-dev.txt
 
-#### 6. เริ่มต้นใช้งานโปรแกรม
-รันคำสั่ง:
-```bash
+# 4. ทดสอบระบบ
+python -m pytest tests -v
+
+# 5. รันโปรแกรม
 python main.py
 ```
-หรือดับเบิลคลิกไฟล์ `run.bat` ได้ทันที
 
 ---
 
-### วิธีที่ 2: ติดตั้งผ่านไฟล์ Installer (.exe) สำหรับใช้งานหน้าร้าน
-
-1. รันไฟล์ติดตั้ง `PopCentral-POS-UAT-1.2.12-setup.exe`
-2. เลือกโฟลเดอร์ปลายทางที่ต้องการติดตั้ง (เช่น `C:\PopCentral POS`)
-3. ตัวติดตั้งจะทำการแยกไฟล์และสร้าง Shortcut บนเดสก์ท็อปให้อัตโนมัติ
-4. ดับเบิลคลิกที่ไอคอน `PopCentral POS` เพื่อเริ่มใช้งาน
-
----
-
-## การตั้งค่าเริ่มต้นเชื่อมต่อ ERP (Initial Configuration)
-
-เมื่อเปิดโปรแกรมครั้งแรก ระบบจะแสดงหน้าต่าง **เข้าสู่ระบบจุดขาย (POS Terminal Authentication)**:
-
-1. **ERP URL**: ใส่ที่อยู่ URL ของเซิร์ฟเวอร์ ERP เช่น:
-   ```
-   https://erp.popstarcenter.com
-   ```
-2. **POS Token**: ใส่ Token ที่ได้รับจากระบบ ERP สำหรับเครื่อง POS ประจำสาขา
-3. **Username**: ใส่ชื่อผู้ใช้งานแคชเชียร์
-4. กดปุ่ม **"เข้าสู่ระบบ (บันทึกข้อมูล)"**
-   - ระบบจะตรวจสอบการเชื่อมต่อไปยัง ERP ดึงข้อมูลสาขา (Branch) และรายการสินค้าล่าสุดลงฐานข้อมูลในเครื่องอัตโนมัติ
-
----
-
-## การทดสอบระบบ (Running Automated Tests)
-
-โปรเจกต์มีชุดทดสอบครอบคลุมทั้ง Flow การขาย, ออฟไลน์เช็คเอาต์, การคำนวณใบเสร็จ และการซิงค์:
+## วิธี Build ตัวติดตั้ง (.exe) ด้วยตนเอง
 
 ```powershell
-$env:PYTHONPATH = "."
-python -m pytest tests -W ignore
+powershell -ExecutionPolicy Bypass -File .\build_pos.ps1 -Version "1.2.15"
 ```
-หรือรันผ่านสคริปต์:
-```cmd
-run_tests.bat
-```
-
----
-
-## วิธี Build เป็นไฟล์ติดตั้ง (.exe)
-
-โปรเจกต์มีสคริปต์ PowerShell สำหรับคอมไพล์ด้วย **PyInstaller** และแพ็กเกจเป็นไฟล์ติดตั้ง Self-Extracting ด้วย **7-Zip**:
-
-### สิ่งที่ต้องมีเพิ่มเติม:
-- ติดตั้งโปรแกรม [7-Zip (64-bit)](https://www.7-zip.org/) ไว้ที่ `C:\Program Files\7-Zip`
-
-### คำสั่ง Build:
-```powershell
-powershell -ExecutionPolicy Bypass -File .\build_pos.ps1 -Version "1.2.12"
-```
-ไฟล์ติดตั้งสำเร็จรูปจะถูกสร้างไว้ที่โฟลเดอร์ `dist\PopCentral-POS-UAT-1.2.12-setup.exe`
-
----
-
-## โครงสร้างโปรเจกต์ (Project Structure)
-
-```text
-posCentral/
-├── assets/                  # ไอคอน โลโก้ รูปภาพ และคู่มือ
-├── database/
-│   ├── __init__.py
-│   └── models.py            # SQLAlchemy Database Models & Migration
-├── services/
-│   ├── __init__.py
-│   ├── offline_auth.py      # ระบบยืนยันตัวตนแคชเชียร์แบบออฟไลน์
-│   └── scale_service.py     # ตัวแปลงบาร์โค้ดเครื่องชั่งน้ำหนัก
-├── ui/
-│   ├── main_window.py       # หน้าต่างขายหลัก (POS Main Window)
-│   ├── token_dialog.py      # หน้าต่างตั้งค่าและ Token เข้าสู่ระบบ
-│   ├── login_dialog.py      # หน้าต่างสลับแคชเชียร์
-│   ├── payment_dialog.py    # หน้าต่างรับชำระเงิน (Cash/QR)
-│   ├── receipt_dialog.py    # ออกแบบและพิมพ์ใบเสร็จ
-│   ├── shift_dialog.py      # เปิด/ปิดกะขาย
-│   ├── pending_sync_dialog.py # ตรวจสอบรายการบิลค้างส่ง
-│   ├── discount_dialog.py   # จัดการส่วนลดสินค้า/ท้ายบิล
-│   ├── held_bills_dialog.py # บิลพักชั่วคราว
-│   ├── scale_weight_dialog.py # หน้าต่างกรอก/ยืนยันน้ำหนัก
-│   └── customer_display.py  # จอแสดงผลฝั่งลูกค้า (Customer Display)
-├── tests/                   # ชุดทดสอบ Automated Pytest (19 Tests)
-├── build_pos.ps1            # สคริปต์ Build ตัวติดตั้ง (.exe)
-├── main.py                  # จุดเริ่มต้นการทำงานหลัก (App Entry Point)
-├── sync_worker.py           # Background Sync Engine (Real-time Outbox)
-├── pos.db                   # Template SQLite Database พร้อม Seed แคตตาล็อก
-├── requirements.txt         # Production Dependencies
-├── requirements-dev.txt     # Development & Build Dependencies
-├── run.bat                  # สคริปต์รันโปรแกรมด่วน
-├── run_tests.bat            # สคริปต์รัน Flake8 และ Pytest
-└── README.md                # เอกสารคู่มือการติดตั้งและใช้งาน
-```
+ไฟล์ติดตั้งสำเร็จรูปจะถูกสร้างไว้ที่ `dist\PopCentral-POS-UAT-1.2.15-setup.exe`
 
 ---
 
