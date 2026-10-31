@@ -1,11 +1,10 @@
-import traceback
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QMessageBox, QFrame, QDoubleSpinBox
 )
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
 from database.models import init_db, Product
+
 
 def is_scale_product(product):
     """
@@ -31,7 +30,7 @@ def is_scale_product(product):
         sku = str(getattr(product, 'sku_code', '') or '')
         barcode = str(getattr(product, 'barcode', '') or '')
         unit = str(getattr(product, 'unit', '') or getattr(product, 'unit_name', '') or '')
-        
+
     combined = f"{name} {sku} {barcode}".lower()
     if 'ชั่ง' in combined or 'ซั่ง' in combined:
         return True
@@ -41,7 +40,10 @@ def is_scale_product(product):
         return True
     if sku.startswith('800') or sku.startswith('801') or (len(sku) == 6 and sku.startswith('80')):
         return True
+    if barcode.startswith('800') or barcode.startswith('801') or (len(barcode) == 6 and barcode.startswith('80')):
+        return True
     return False
+
 
 class ScaleWeightDialog(QDialog):
     """
@@ -60,7 +62,7 @@ class ScaleWeightDialog(QDialog):
         self.selected_product = target_product if (target_product and is_scale_product(target_product)) else None
         self.entered_weight = max(0.001, float(initial_weight or 1.000))
         self.products_list = []
-        
+
         self.setWindowTitle("สินค้าชั่งน้ำหนัก (ระบุกิโลกรัม)")
         self.setFixedWidth(450)
         self.setStyleSheet("""
@@ -104,7 +106,7 @@ class ScaleWeightDialog(QDialog):
                 font-weight: bold;
             }
         """)
-        
+
         self.setup_ui()
         self.load_products()
         if self.selected_product:
@@ -123,7 +125,7 @@ class ScaleWeightDialog(QDialog):
         h_layout = QVBoxLayout(header_frame)
         h_layout.setContentsMargins(4, 4, 4, 4)
         h_layout.setSpacing(2)
-        
+
         title_lbl = QLabel("ขายสินค้าชั่งน้ำหนัก (กิโลกรัม)")
         title_lbl.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
         sub_lbl = QLabel("เฉพาะสินค้าประเภทชั่งน้ำหนักเท่านั้น ระบุกิโลกรัม")
@@ -178,7 +180,7 @@ class ScaleWeightDialog(QDialog):
         weight_box.setSpacing(4)
         weight_lbl = QLabel("น้ำหนักสินค้า (กิโลกรัม):")
         weight_lbl.setStyleSheet("font-weight: bold; font-size: 14px; color: #0d9488;")
-        
+
         weight_row = QHBoxLayout()
         self.weight_input = QDoubleSpinBox()
         self.weight_input.setDecimals(3)
@@ -187,7 +189,7 @@ class ScaleWeightDialog(QDialog):
         self.weight_input.setValue(self.entered_weight)
         self.weight_input.setStyleSheet("font-size: 20px; font-weight: bold; color: #0f172a; height: 44px; padding: 4px 8px;")
         self.weight_input.valueChanged.connect(self.update_calc_total)
-        
+
         kg_unit_lbl = QLabel("กก. (kg)")
         kg_unit_lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #475569;")
         weight_row.addWidget(self.weight_input, 1)
@@ -216,12 +218,12 @@ class ScaleWeightDialog(QDialog):
         cancel_btn.setFixedHeight(42)
         cancel_btn.setStyleSheet("background: #e2e8f0; color: #475569; border-radius: 8px; padding: 8px 14px; font-weight: bold; font-size: 14px;")
         cancel_btn.clicked.connect(self.reject)
-        
+
         self.submit_btn = QPushButton("เพิ่มลงตะกร้าสินค้า (Enter)")
         self.submit_btn.setFixedHeight(42)
         self.submit_btn.setStyleSheet("background: #0d9488; color: white; border-radius: 8px; padding: 8px 18px; font-weight: bold; font-size: 15px;")
         self.submit_btn.clicked.connect(self.on_submit)
-        
+
         btn_row.addWidget(cancel_btn, 1)
         btn_row.addWidget(self.submit_btn, 2)
         layout.addLayout(btn_row)
@@ -232,7 +234,7 @@ class ScaleWeightDialog(QDialog):
     def load_products(self):
         session = init_db(f"sqlite:///{self.db_path}")
         try:
-            products = session.query(Product).filter(Product.is_active == True).all()
+            products = session.query(Product).filter(Product.is_active == True).all()  # noqa: E712
             if not products:
                 return
 
@@ -279,7 +281,7 @@ class ScaleWeightDialog(QDialog):
             self.prod_price_lbl.setText("฿0.00 / กก.")
             self.update_calc_total()
             return
-            
+
         price = float(self.selected_product.pos_price or self.selected_product.default_price or 0.0)
         self.prod_name_lbl.setText(f"{self.selected_product.name_th}")
         self.prod_price_lbl.setText(f"฿{price:,.2f} / กก.")
@@ -295,36 +297,54 @@ class ScaleWeightDialog(QDialog):
         self.calc_total_lbl.setText(f"฿{total:,.2f}")
 
     def on_scan_barcode(self):
-        code = self.scan_input.text().strip()
+        from services.barcode_lookup import lookup_product, normalize_scan_text
+        from services.scale_service import ScaleBarcodeParser
+
+        raw_code = self.scan_input.text()
+        code, digits = normalize_scan_text(raw_code)
         if not code:
             return
-            
+
         session = init_db(f"sqlite:///{self.db_path}")
         try:
-            prod = session.query(Product).filter(
-                (Product.barcode == code) | 
-                (Product.sku_code == code) |
-                (Product.sku_code.endswith(code))
-            ).first()
-            
+            result = lookup_product(session, raw_code, scale_parser=ScaleBarcodeParser)
+            status = result.get('status')
+            prod = result.get('product')
+            if status == 'ambiguous' and result.get('products'):
+                prod = result['products'][0]
+
+            if prod is None:
+                search_code = digits or code
+                prod = session.query(Product).filter(
+                    (Product.barcode == search_code) |
+                    (Product.sku_code == search_code) |
+                    (Product.sku_code.endswith(search_code))
+                ).first()
+
             if prod:
                 # ตรวจสอบว่าสินค้าเป็นประเภทชั่งน้ำหนักหรือไม่
                 if not is_scale_product(prod):
                     QMessageBox.warning(
-                        self, 
-                        "แจ้งเตือน", 
+                        self,
+                        "แจ้งเตือน",
                         f"สินค้า '{prod.name_th}' เป็นสินค้าขายตามจำนวนชิ้น ไม่ใช่สินค้าประเภทชั่งน้ำหนัก\n(ฟังก์ชันนี้ใช้ได้เฉพาะสินค้าชั่งน้ำหนักเท่านั้น)"
                     )
                     self.scan_input.selectAll()
                     return
 
                 self.select_product(prod)
+                if status == 'scale' and result.get('scale', {}).get('weight'):
+                    try:
+                        self.weight_input.setValue(float(result['scale']['weight']))
+                    except Exception:
+                        pass
                 self.scan_input.clear()
                 # Focus ไปที่ช่องใส่น้ำหนัก
                 self.weight_input.setFocus()
                 self.weight_input.selectAll()
             else:
-                QMessageBox.warning(self, "ไม่พบสินค้า", f"ไม่พบสินค้าที่มีรหัสหรือบาร์โค้ด: '{code}'")
+                shown = digits if digits and digits != code else code
+                QMessageBox.warning(self, "ไม่พบสินค้า", f"ไม่พบสินค้าที่มีรหัสหรือบาร์โค้ด: '{shown}'")
                 self.scan_input.selectAll()
         finally:
             session.close()
@@ -333,7 +353,7 @@ class ScaleWeightDialog(QDialog):
         if not self.selected_product:
             QMessageBox.warning(self, "แจ้งเตือน", "กรุณาเลือกสินค้าประเภทชั่งน้ำหนักก่อนบันทึก")
             return
-            
+
         if not is_scale_product(self.selected_product):
             QMessageBox.warning(self, "แจ้งเตือน", "สินค้าที่เลือกไม่ใช่สินค้าประเภทชั่งน้ำหนัก")
             return
@@ -342,6 +362,6 @@ class ScaleWeightDialog(QDialog):
         if weight <= 0:
             QMessageBox.warning(self, "แจ้งเตือน", "กรุณาระบุน้ำหนักที่ถูกต้อง (มากกว่า 0)")
             return
-            
+
         self.entered_weight = weight
         self.accept()

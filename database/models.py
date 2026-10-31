@@ -47,6 +47,22 @@ class Product(Base):
     scale_type = Column(String(20), default='weight') # weight (kg), piece
     is_promotion = Column(Boolean, default=False)
 
+# 3.1 product_barcodes: every active barcode of a product (ERP keeps many per product,
+# e.g. manufacturer EAN + internal label), so scanning any of them finds the product offline.
+class ProductBarcode(Base):
+    __tablename__ = 'product_barcodes'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(Integer, nullable=False, index=True)
+    barcode = Column(String(64), nullable=False, index=True)
+    # barcode without leading zeros: scanners/labels often drop them (0000001010077 -> 1010077)
+    barcode_norm = Column(String(64), nullable=True, index=True)
+    barcode_type = Column(String(30), nullable=True)
+    unit_id = Column(Integer, nullable=True)
+    unit_name = Column(String(100), nullable=True)
+    unit_factor = Column(Float, nullable=True, default=1.0)
+    price = Column(Float, nullable=True)
+
 # 4. scale_profiles
 class ScaleProfile(Base):
     __tablename__ = 'scale_profiles'
@@ -331,12 +347,53 @@ def init_db(db_path=None):
             if 'discount_amount' not in sales_cols:
                 conn.exec_driver_sql("ALTER TABLE sales ADD COLUMN discount_amount FLOAT DEFAULT 0.0")
 
+            pb_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(product_barcodes)").fetchall()}
+            if pb_cols:
+                if 'barcode_norm' not in pb_cols:
+                    conn.exec_driver_sql("ALTER TABLE product_barcodes ADD COLUMN barcode_norm VARCHAR(64)")
+                if 'barcode_type' not in pb_cols:
+                    conn.exec_driver_sql("ALTER TABLE product_barcodes ADD COLUMN barcode_type VARCHAR(30)")
+                if 'unit_id' not in pb_cols:
+                    conn.exec_driver_sql("ALTER TABLE product_barcodes ADD COLUMN unit_id INTEGER")
+                if 'unit_name' not in pb_cols:
+                    conn.exec_driver_sql("ALTER TABLE product_barcodes ADD COLUMN unit_name VARCHAR(100)")
+                if 'unit_factor' not in pb_cols:
+                    conn.exec_driver_sql("ALTER TABLE product_barcodes ADD COLUMN unit_factor FLOAT DEFAULT 1.0")
+                if 'price' not in pb_cols:
+                    conn.exec_driver_sql("ALTER TABLE product_barcodes ADD COLUMN price FLOAT")
+
             # Indexes for instant search, barcode scan, and sync checks
             conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)")
             conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku_code)")
             conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_products_cat_active ON products(category_id, is_active)")
+            conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_pb_barcode ON product_barcodes(barcode)")
+            conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_pb_barcode_norm ON product_barcodes(barcode_norm)")
+            conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_pb_product_id ON product_barcodes(product_id)")
             conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_sales_status ON sales(status)")
             conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox(status)")
+
+            try:
+                conn.exec_driver_sql(
+                    "UPDATE product_barcodes "
+                    "SET barcode_norm = CASE WHEN ltrim(barcode, '0') = '' THEN '0' ELSE ltrim(barcode, '0') END "
+                    "WHERE barcode_norm IS NULL OR barcode_norm = ''"
+                )
+                conn.exec_driver_sql(
+                    "INSERT INTO product_barcodes (product_id, barcode, barcode_norm, unit_factor) "
+                    "SELECT p.id, p.barcode, CASE WHEN ltrim(p.barcode, '0') = '' THEN '0' ELSE ltrim(p.barcode, '0') END, 1.0 "
+                    "FROM products p "
+                    "WHERE p.barcode IS NOT NULL AND p.barcode != '' AND p.barcode != '-' "
+                    "AND NOT EXISTS (SELECT 1 FROM product_barcodes pb WHERE pb.product_id = p.id AND pb.barcode = p.barcode)"
+                )
+                conn.exec_driver_sql(
+                    "INSERT INTO product_barcodes (product_id, barcode, barcode_norm, unit_factor) "
+                    "SELECT p.id, p.sku_code, CASE WHEN ltrim(p.sku_code, '0') = '' THEN '0' ELSE ltrim(p.sku_code, '0') END, 1.0 "
+                    "FROM products p "
+                    "WHERE p.sku_code IS NOT NULL AND p.sku_code != '' AND p.sku_code != '-' "
+                    "AND NOT EXISTS (SELECT 1 FROM product_barcodes pb WHERE pb.product_id = p.id AND pb.barcode = p.sku_code)"
+                )
+            except Exception:
+                pass
 
             try:
                 conn.exec_driver_sql("PRAGMA wal_checkpoint(PASSIVE)")

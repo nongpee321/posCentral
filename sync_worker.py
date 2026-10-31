@@ -16,7 +16,7 @@ import threading
 
 from database.models import (
 
-    init_db, Product, Category, Sale, SaleItem, Payment, Outbox, SyncLog, PosShift
+    init_db, Product, ProductBarcode, Category, Sale, SaleItem, Payment, Outbox, SyncLog, PosShift
 
 )
 
@@ -501,17 +501,80 @@ class SyncWorker(QThread):
 
             session.query(Product).filter(Product.id > 0).delete(synchronize_session=False)
 
+            session.query(ProductBarcode).filter(ProductBarcode.product_id > 0).delete(synchronize_session=False)
+
             for prod_data in products_data:
 
                 barcode_val = ''
 
-                if prod_data.get('barcodes'):
+                all_codes = []
 
-                    barcode_val = str(prod_data.get('barcodes')[0].get('barcode', ''))
+                for bc in (prod_data.get('barcodes') or []):
+
+                    code = str((bc or {}).get('barcode') or '').strip()
+
+                    if code and code not in [c['code'] for c in all_codes]:
+
+                        unit_obj = (bc or {}).get('unit') or {}
+
+                        all_codes.append({
+                            'code': code,
+                            'barcode_type': (bc or {}).get('barcode_type'),
+                            'unit_id': (bc or {}).get('unit_id'),
+                            'unit_name': (bc or {}).get('unit_name') or (unit_obj.get('name') if isinstance(unit_obj, dict) else None),
+                            'unit_factor': (bc or {}).get('unit_factor'),
+                            'price': (bc or {}).get('price'),
+                        })
+
+                sku_str = str(prod_data.get('sku_code', '') or '').strip()
+
+                if all_codes:
+
+                    barcode_val = all_codes[0]['code']
 
                 else:
 
-                    barcode_val = str(prod_data.get('sku_code', ''))
+                    barcode_val = sku_str
+
+                if sku_str and sku_str not in [c['code'] for c in all_codes]:
+
+                    all_codes.append({
+                        'code': sku_str,
+                        'barcode_type': 'CUSTOM',
+                        'unit_id': None,
+                        'unit_name': None,
+                        'unit_factor': 1.0,
+                        'price': None,
+                    })
+
+                has_scale_plu = any(
+                    (c.get('barcode_type') == 'SCALE_PLU')
+                    or (len(c['code']) == 6 and c['code'].isdigit() and c['code'].startswith(('800', '801')))
+                    for c in all_codes
+                )
+
+                for bc_item in all_codes:
+
+                    code = bc_item['code']
+                    try:
+                        unit_factor = float(bc_item['unit_factor']) if bc_item.get('unit_factor') is not None else 1.0
+                    except (TypeError, ValueError):
+                        unit_factor = 1.0
+                    try:
+                        bc_price = float(bc_item['price']) if bc_item.get('price') is not None else None
+                    except (TypeError, ValueError):
+                        bc_price = None
+
+                    session.add(ProductBarcode(
+                        product_id=prod_data['id'],
+                        barcode=code,
+                        barcode_norm=(code.lstrip('0') or '0'),
+                        barcode_type=bc_item.get('barcode_type'),
+                        unit_id=bc_item.get('unit_id'),
+                        unit_name=bc_item.get('unit_name'),
+                        unit_factor=unit_factor,
+                        price=bc_price,
+                    ))
 
                 prod = Product(
 
@@ -537,7 +600,7 @@ class SyncWorker(QThread):
 
                     stock_qty=prod_data.get('stock_qty'),
 
-                    is_scale_item=bool(prod_data.get('is_scale') or prod_data.get('is_scale_item') or prod_data.get('is_weight') or ('ชั่ง' in str(prod_data.get('name_th') or '')) or ('(กก' in str(prod_data.get('name_th') or '')) or str(prod_data.get('sku_code') or '').startswith(('800', '801')) or False),
+                    is_scale_item=bool(prod_data.get('is_scale') or prod_data.get('is_scale_item') or prod_data.get('is_weight') or has_scale_plu or ('ชั่ง' in str(prod_data.get('name_th') or '')) or ('(กก' in str(prod_data.get('name_th') or '')) or str(prod_data.get('sku_code') or '').startswith(('800', '801')) or False),
 
                     is_promotion=bool(prod_data.get('is_promotion') or prod_data.get('is_flash_sale') or (prod_data.get('price_source') in ['promotion', 'flash_sale']))
 
