@@ -1732,7 +1732,7 @@ class MainWindow(QMainWindow):
 
         
 
-        version_label = QLabel("v1.2.16")
+        version_label = QLabel("v1.2.17")
 
         version_label.setStyleSheet("font-size: 13px; color: #64748b; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 8px;")
 

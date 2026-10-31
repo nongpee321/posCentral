@@ -64,15 +64,15 @@ class CustomerDisplayWindow(QMainWindow):
         self.setCentralWidget(central)
         
         main_layout = QVBoxLayout(central)
-        main_layout.setContentsMargins(15, 15, 15, 10)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(12, 8, 12, 6)
+        main_layout.setSpacing(6)
 
         # ---------------- HEADER ----------------
         header_layout = QHBoxLayout()
         header_layout.setAlignment(Qt.AlignTop)
         
         welcome_lbl = QLabel("ยินดีต้อนรับ (Welcome)")
-        welcome_lbl.setStyleSheet("font-size: 30px; font-weight: 900; color: #059669; margin: 0px; padding: 0px;")
+        welcome_lbl.setStyleSheet("font-size: 24px; font-weight: 900; color: #059669; margin: 0px; padding: 0px;")
         header_layout.addWidget(welcome_lbl, 0, Qt.AlignVCenter)
         
         header_layout.addStretch()
@@ -164,55 +164,57 @@ class CustomerDisplayWindow(QMainWindow):
 
         # RIGHT PANEL
         right_panel = QVBoxLayout()
-        right_panel.setSpacing(10)
+        right_panel.setSpacing(6)
         # REMOVED right_panel.setAlignment(Qt.AlignTop)
 
         total_box = QFrame()
-        total_box.setStyleSheet("QFrame { background-color: white; border-radius: 12px; border: 2px solid #10b981; }")
+        total_box.setStyleSheet("QFrame { background-color: white; border-radius: 10px; border: 2px solid #10b981; }")
         total_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         total_layout = QVBoxLayout(total_box)
-        total_layout.setContentsMargins(15, 15, 15, 15)
+        total_layout.setContentsMargins(10, 8, 10, 8)
+        total_layout.setSpacing(3)
         
         total_title = QLabel("ยอดชำระสุทธิ (Total)")
-        total_title.setStyleSheet("font-size: 20px; font-weight: bold; color: #1e293b; border: none;")
+        total_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #1e293b; border: none;")
         total_title.setAlignment(Qt.AlignCenter)
         total_layout.addWidget(total_title)
         
         self.total_lbl = QLabel("0.00")
-        self.total_lbl.setStyleSheet("font-size: 60px; font-weight: 900; color: #dc2626; border: none; font-family: Arial;")
+        self.total_lbl.setStyleSheet("font-size: 42px; font-weight: 900; color: #dc2626; border: none; font-family: Arial;")
         self.total_lbl.setAlignment(Qt.AlignCenter)
         total_layout.addWidget(self.total_lbl)
         
         total_currency = QLabel("● สกุลเงิน: บาท (THB)")
-        total_currency.setStyleSheet("font-size: 13px; font-weight: bold; color: #64748b; border: none;")
+        total_currency.setStyleSheet("font-size: 11px; font-weight: bold; color: #64748b; border: none;")
         total_currency.setAlignment(Qt.AlignCenter)
         total_layout.addWidget(total_currency)
         
         subtotal_frame = QFrame()
-        subtotal_frame.setStyleSheet("QFrame { background-color: #f0fdf4; border-radius: 10px; border: none; margin-top: 10px; }")
+        subtotal_frame.setStyleSheet("QFrame { background-color: #f0fdf4; border-radius: 8px; border: none; margin-top: 4px; }")
         subtotal_layout = QHBoxLayout(subtotal_frame)
+        subtotal_layout.setContentsMargins(8, 4, 8, 4)
         
         sub1 = QVBoxLayout()
         lbl_s1 = QLabel("ราคาก่อนภาษี")
-        lbl_s1.setStyleSheet("color: #475569; font-size: 13px; font-weight: bold;")
+        lbl_s1.setStyleSheet("color: #475569; font-size: 11px; font-weight: bold;")
         self.subtotal_lbl = QLabel("0.00 ฿")
-        self.subtotal_lbl.setStyleSheet("color: #1e293b; font-size: 15px; font-weight: bold;")
+        self.subtotal_lbl.setStyleSheet("color: #1e293b; font-size: 13px; font-weight: bold;")
         sub1.addWidget(lbl_s1)
         sub1.addWidget(self.subtotal_lbl)
         
         sub2 = QVBoxLayout()
         lbl_s2 = QLabel("VAT 7%")
-        lbl_s2.setStyleSheet("color: #475569; font-size: 13px; font-weight: bold;")
+        lbl_s2.setStyleSheet("color: #475569; font-size: 11px; font-weight: bold;")
         self.vat_lbl = QLabel("0.00 ฿")
-        self.vat_lbl.setStyleSheet("color: #1e293b; font-size: 15px; font-weight: bold;")
+        self.vat_lbl.setStyleSheet("color: #1e293b; font-size: 13px; font-weight: bold;")
         sub2.addWidget(lbl_s2)
         sub2.addWidget(self.vat_lbl)
         
         sub3 = QVBoxLayout()
         lbl_s3 = QLabel("ส่วนลด")
-        lbl_s3.setStyleSheet("color: #059669; font-size: 13px; font-weight: bold;")
+        lbl_s3.setStyleSheet("color: #059669; font-size: 11px; font-weight: bold;")
         self.disc_lbl = QLabel("0.00 ฿")
-        self.disc_lbl.setStyleSheet("color: #10b981; font-size: 15px; font-weight: bold;")
+        self.disc_lbl.setStyleSheet("color: #10b981; font-size: 13px; font-weight: bold;")
         sub3.addWidget(lbl_s3)
         sub3.addWidget(self.disc_lbl)
         
@@ -225,17 +227,19 @@ class CustomerDisplayWindow(QMainWindow):
 
         # QR BOX
         self.qr_box = QFrame()
-        self.qr_box.setStyleSheet("QFrame { background-color: white; border-radius: 12px; border: 1px solid #e2e8f0; }")
+        self.qr_box.setStyleSheet("QFrame { background-color: white; border-radius: 10px; border: 1px solid #cbd5e1; }")
+        self.qr_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         qr_layout = QVBoxLayout(self.qr_box)
-        qr_layout.setContentsMargins(15, 10, 15, 10)
+        qr_layout.setContentsMargins(10, 6, 10, 6)
+        qr_layout.setSpacing(3)
         
         qr_h = QHBoxLayout()
         qr_badge = QLabel("THAI QR")
-        qr_badge.setStyleSheet("background-color: #1e3a8a; color: white; border-radius: 6px; padding: 4px 8px; font-weight: bold; font-size: 12px;")
+        qr_badge.setStyleSheet("background-color: #1e3a8a; color: white; border-radius: 4px; padding: 2px 6px; font-weight: bold; font-size: 11px;")
         qr_title = QLabel("พร้อมเพย์ (PromptPay)")
-        qr_title.setStyleSheet("font-weight: bold; font-size: 15px; color: #1e293b; border: none;")
+        qr_title.setStyleSheet("font-weight: bold; font-size: 13px; color: #1e293b; border: none;")
         qr_status = QLabel("รอสแกน")
-        qr_status.setStyleSheet("background-color: #d1fae5; color: #059669; border-radius: 10px; padding: 4px 10px; font-weight: bold; font-size: 12px;")
+        qr_status.setStyleSheet("background-color: #d1fae5; color: #059669; border-radius: 6px; padding: 2px 8px; font-weight: bold; font-size: 11px;")
         
         qr_h.addWidget(qr_badge)
         qr_h.addWidget(qr_title)
@@ -244,33 +248,44 @@ class CustomerDisplayWindow(QMainWindow):
         qr_layout.addLayout(qr_h, 0)
         
         qr_body = QVBoxLayout()
+        qr_body.setSpacing(4)
         qr_body.setAlignment(Qt.AlignCenter)
         
         self.qr_image = QLabel()
-        self.qr_image.setFixedSize(350, 350)
-        self.qr_image.setStyleSheet("border: 2px solid #e2e8f0; border-radius: 8px; padding: 5px;")
+        self.qr_image.setFixedSize(210, 210)
+        self.qr_image.setStyleSheet("border: 1.5px solid #e2e8f0; border-radius: 6px; padding: 3px; background: white;")
         self.qr_image.setScaledContents(True)
         
         self.qr_timer_lbl = QLabel("")
-        self.qr_timer_lbl.setStyleSheet("color: #dc2626; font-size: 22px; font-weight: bold; border: none; margin-top: 10px;")
+        self.qr_timer_lbl.setStyleSheet("""
+            background-color: #fee2e2;
+            color: #dc2626;
+            font-size: 15px;
+            font-weight: bold;
+            border: 1px solid #fecaca;
+            border-radius: 6px;
+            padding: 3px 14px;
+            margin-top: 2px;
+        """)
         self.qr_timer_lbl.setAlignment(Qt.AlignCenter)
         
         qr_body.addWidget(self.qr_image, 0, Qt.AlignCenter)
         qr_body.addWidget(self.qr_timer_lbl, 0, Qt.AlignCenter)
         
-        qr_layout.addLayout(qr_body, 1)
+        qr_layout.addLayout(qr_body, 0)
         
-        right_panel.addWidget(self.qr_box, 1) # ADDED STRETCH 1 TO QR BOX
+        right_panel.addWidget(self.qr_box, 0)
         
         self.spacer_widget = QWidget()
         self.spacer_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         right_panel.addWidget(self.spacer_widget, 1)
+        right_panel.addStretch(1)
         content_layout.addLayout(right_panel, 5)
 
         main_layout.addLayout(content_layout)
         
         footer_frame = QFrame()
-        footer_frame.setFixedHeight(30)
+        footer_frame.setFixedHeight(22)
         footer_layout = QHBoxLayout(footer_frame)
         footer_layout.setContentsMargins(0, 0, 0, 0)
         
@@ -316,7 +331,7 @@ class CustomerDisplayWindow(QMainWindow):
         self.spacer_widget.show()
         
         self.total_lbl.setText(f"{total_amount:,.2f}")
-        self.total_lbl.setStyleSheet("font-size: 60px; font-weight: 900; color: #dc2626; border: none; font-family: Arial;")
+        self.total_lbl.setStyleSheet("font-size: 42px; font-weight: 900; color: #dc2626; border: none; font-family: Arial;")
         
         sub = total_amount / 1.07
         vat = total_amount - sub
@@ -385,7 +400,7 @@ class CustomerDisplayWindow(QMainWindow):
         self.table.setRowCount(0)
         self.qr_box.hide()
         self.spacer_widget.show()
-        self.total_lbl.setStyleSheet("font-size: 60px; font-weight: 900; color: #10b981; border: none; font-family: Arial;")
+        self.total_lbl.setStyleSheet("font-size: 42px; font-weight: 900; color: #10b981; border: none; font-family: Arial;")
         self.total_lbl.setText(f"{change:,.2f}")
 
     def toggle_fullscreen(self):
