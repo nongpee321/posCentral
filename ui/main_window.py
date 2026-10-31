@@ -1732,7 +1732,7 @@ class MainWindow(QMainWindow):
 
         
 
-        version_label = QLabel("v1.2.17")
+        version_label = QLabel("v1.2.18")
 
         version_label.setStyleSheet("font-size: 13px; color: #64748b; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 8px;")
 
@@ -2244,11 +2244,13 @@ class MainWindow(QMainWindow):
 
                         QMessageBox.information(self, "สำเร็จ", f"ปิดกะเรียบร้อย\nยอดขาด/เกิน: {diff_str}")
 
+                        old_shift = dict(self.current_shift or {})
+
                         self._close_shift_local(dialog.counted_cash, synced=True)
 
                         from ui.receipt_dialog import ShiftReportDialog
 
-                        shift_payload = dict(self.current_shift or {})
+                        shift_payload = old_shift
 
                         shift_payload.update(data.get('shift', {}))
 
@@ -2280,7 +2282,7 @@ class MainWindow(QMainWindow):
 
                         self._close_shift_local(dialog.counted_cash, synced=False)
 
-                        QMessageBox.information(self, "สำเร็จ", "ปิดกะแบบออฟไลน์เรียบร้อย (ระบบจะส่งข้อมูลภายหลัง)")
+                        QMessageBox.information(self, "สำเร็จ", "ปิดกะแบบออฟไลน์เรียบร้อย\n(ระบบจะส่งข้อมูลขึ้น ERP อัตโนมัติเมื่อออนไลน์)")
 
         else:
 
@@ -2336,13 +2338,19 @@ class MainWindow(QMainWindow):
 
                         server_id = shift_obj.get('id') or data.get('shift_id', 0)
 
-                        self._open_shift_local(dialog.opening_cash, server_id=server_id, synced=True)
+                        local_id = self._open_shift_local(dialog.opening_cash, server_id=server_id, synced=True)
 
                         if shift_obj:
 
-                            self.current_shift = shift_obj
+                            self.current_shift = dict(shift_obj)
 
                             self.current_shift['server_id'] = server_id
+
+                            self.current_shift['id'] = server_id
+
+                            if local_id:
+
+                                self.current_shift['local_id'] = local_id
 
                         msg_text = "เปิดกะเรียบร้อย (ออนไลน์)"
 
@@ -2358,11 +2366,10 @@ class MainWindow(QMainWindow):
 
                         if "มีกะเปิดอยู่แล้ว" in str(err_msg):
 
-                            # กะเปิดอยู่แล้ว ดึงข้อมูลกะกลับมา
+                            # กะเปิดอยู่แล้ว ดึงข้อมูลกะกลับมาและเปิดใช้งานปุ่มปิดกะทันที
+                            self.check_active_shift(show_resume_dialog=False, force_resume=True)
 
-                            self.check_active_shift(show_resume_dialog=False)
-
-                            QMessageBox.information(self, "แจ้งเตือน", "มีกะเปิดอยู่แล้วบนระบบ ERP เชื่อมต่อกะขายสำเร็จ")
+                            QMessageBox.information(self, "แจ้งเตือน", "มีกะเปิดอยู่แล้วบนระบบ ERP เชื่อมต่อกะขายเดิมสำเร็จ\n(คุณสามารถกด 'ปิดกะ' เพื่อปิดกะเดิม หรือขายต่อได้ทันที)")
 
                         else:
 
@@ -2386,274 +2393,228 @@ class MainWindow(QMainWindow):
 
     
 
-    def _close_shift_local(self, counted_cash, synced=False):
-
+    def _close_shift_local(self, counted_cash, synced=False, closing_note=None):
         try:
-
             from datetime import datetime
-
+            import json
+            import time
             session = init_db(f'sqlite:///{self.db_path}')
+            shift_dict = dict(self.current_shift or {})
+            local_id = shift_dict.get('local_id')
+            server_id = shift_dict.get('id') or shift_dict.get('server_id')
 
-            shift_id = self.current_shift.get('local_id')
+            shift = None
+            if local_id:
+                shift = session.query(PosShift).filter_by(id=local_id).first()
+            if not shift and server_id:
+                shift = session.query(PosShift).filter_by(server_id=server_id).first()
+            if not shift:
+                shift = session.query(PosShift).filter_by(status='open').order_by(PosShift.id.desc()).first()
+            if not shift:
+                shift = session.query(PosShift).order_by(PosShift.id.desc()).first()
 
-            shift = session.query(PosShift).filter_by(id=shift_id).first() if shift_id else None
+            if not shift:
+                shift = PosShift(
+                    server_id=server_id,
+                    branch_id=self.config.get('branch_id'),
+                    cashier_id=self.config.get('cashier_id'),
+                    cashier_name=self.config.get('cashier_name'),
+                    opening_cash=float(shift_dict.get('opening_cash', 0.0) or 0.0),
+                    expected_cash=float(shift_dict.get('expected_cash', 0.0) or 0.0),
+                    status='open',
+                    sync_status='synced' if synced else 'pending'
+                )
+                session.add(shift)
+                session.flush()
 
-            if shift:
+            shift.closed_at = datetime.utcnow()
+            shift.counted_cash = float(counted_cash)
+            shift.status = 'closed'
+            shift.sync_status = 'synced' if synced else 'pending'
+            if server_id and not shift.server_id:
+                shift.server_id = server_id
 
-                shift.closed_at = datetime.utcnow()
-
-                shift.counted_cash = counted_cash
-
-                shift.status = 'closed'
-
-                shift.sync_status = 'synced' if synced else 'pending'
-
-                session.commit()
-
-            self.current_shift = None
-
-            self.shift_btn.setText("เปิดกะ")
-
-            if hasattr(self, "branch_label"): self.branch_label.hide()
-
-            self.shift_btn.setStyleSheet("QPushButton { background-color: #f59e0b; border: none; color: white; padding: 5px 10px; border-radius: 6px; font-weight: bold;} QPushButton:hover { background-color: #d97706; }")
-
-            if hasattr(self, 'start_sync'):
-
-                self.start_sync()
-
-        except Exception as e:
-
-            pass
-
-            
-
-    def _open_shift_local(self, opening_cash, server_id=None, synced=False):
-
-        try:
-
-            session = init_db(f'sqlite:///{self.db_path}')
-
-            new_shift = PosShift(
-
-                server_id=server_id,
-
-                opening_cash=opening_cash,
-
-                expected_cash=opening_cash,
-
-                status='open',
-
-                sync_status='synced' if synced else 'pending'
-
-            )
-
-            session.add(new_shift)
+            # หากเป็นการปิดกะแบบออฟไลน์ ให้เพิ่มงานลงใน Outbox เพื่อให้ SyncWorker นำไปส่ง ERP
+            if not synced:
+                target_server_id = shift.server_id or server_id
+                outbox_payload = {
+                    'shift_id': target_server_id,
+                    'local_shift_id': shift.id,
+                    'counted_cash': float(counted_cash),
+                    'closing_note': closing_note or "ปิดกะออฟไลน์ (Auto-sync)"
+                }
+                agg_id = str(target_server_id or shift.id)
+                existing_ob = session.query(Outbox).filter(
+                    Outbox.event_type == 'shift_close',
+                    Outbox.aggregate_id == agg_id,
+                    Outbox.status.in_(['pending', 'failed'])
+                ).first()
+                if existing_ob:
+                    existing_ob.payload_json = json.dumps(outbox_payload)
+                    existing_ob.status = 'pending'
+                    existing_ob.retry_count = 0
+                else:
+                    ob_entry = Outbox(
+                        event_type='shift_close',
+                        aggregate_id=agg_id,
+                        idempotency_key=f"shift-close-{agg_id}-{int(time.time())}",
+                        payload_json=json.dumps(outbox_payload),
+                        status='pending',
+                        retry_count=0
+                    )
+                    session.add(ob_entry)
 
             session.commit()
+            session.close()
 
-            
+            self.current_shift = None
+            self.shift_btn.setText("เปิดกะ")
+            if hasattr(self, "branch_label"): self.branch_label.hide()
+            self.shift_btn.setStyleSheet("QPushButton { background-color: #f59e0b; border: none; color: white; padding: 5px 10px; border-radius: 6px; font-weight: bold;} QPushButton:hover { background-color: #d97706; }")
+            if hasattr(self, 'start_sync'):
+                self.start_sync()
+        except Exception as e:
+            print(f"[POS] Error in _close_shift_local: {e}")
+
+    def _open_shift_local(self, opening_cash, server_id=None, synced=False):
+        try:
+            session = init_db(f'sqlite:///{self.db_path}')
+            new_shift = PosShift(
+                server_id=server_id,
+                branch_id=self.config.get('branch_id'),
+                cashier_id=self.config.get('cashier_id'),
+                cashier_name=self.config.get('cashier_name'),
+                opening_cash=opening_cash,
+                expected_cash=opening_cash,
+                status='open',
+                sync_status='synced' if synced else 'pending'
+            )
+            session.add(new_shift)
+            session.commit()
+            local_id = new_shift.id
+            session.close()
 
             self.current_shift = {
-
                 'id': server_id,
-
-                'local_id': new_shift.id,
-
-                'expected_cash': opening_cash
-
+                'server_id': server_id,
+                'local_id': local_id,
+                'expected_cash': opening_cash,
+                'opening_cash': opening_cash
             }
-
             self.shift_btn.setText("ปิดกะ")
-
             if hasattr(self, "branch_label"): self.branch_label.show()
-
             self.shift_btn.setStyleSheet("QPushButton { background-color: #3b82f6; border: none; color: white; padding: 5px 10px; border-radius: 6px; font-weight: bold;} QPushButton:hover { background-color: #2563eb; }")
-
             if hasattr(self, 'start_sync'):
-
                 self.start_sync()
-
+            return local_id
         except Exception as e:
+            print(f"[POS] Error in _open_shift_local: {e}")
+            return None
 
-            pass
-
-
-
-    def check_active_shift(self, show_resume_dialog=False):
-
+    def check_active_shift(self, show_resume_dialog=False, force_resume=False):
         if not self.config.get('pos_token'): return
-
         try:
-
             # Fetch Ping for network status
-
             ping_res = requests.get(
-
                 f"{self.config['api_url']}/api/pos/ping",
-
                 headers={'Authorization': f"Bearer {self.config['pos_token']}", 'Accept': 'application/json'},
-
                 timeout=3
-
             )
-
             if ping_res.status_code == 200:
-
                 data = ping_res.json()
-
                 if 'branch_name' in data and data['branch_name']:
-
                     self.config['branch_name'] = data['branch_name']
-
                     if hasattr(self, 'branch_label'):
-
                         b_name = data['branch_name']
-
                         dev_id = self.config.get('device_id', '')
-
                         self.branch_label.setText(f"สาขา: {b_name}")
-
                         self.branch_label.setToolTip(f"สาขา: {b_name}" + (f"\nรหัสเครื่อง: {dev_id}" if dev_id else ""))
-
                 if 'qr_payment' in data and data['qr_payment']:
-
                     self.config['promptpay_id'] = data['qr_payment'].get('merchant_ref', '')
 
-                    
-
             # If local shift has no server id (offline shift), link it when online
-
             if getattr(self, 'current_shift', None) and not self.current_shift.get('id'):
-
                 try:
-
                     shift_params = {}
-
                     if self.config.get('branch_id'):
-
                         shift_params['branch_id'] = self.config['branch_id']
-
                     if self.config.get('cashier_id'):
-
                         shift_params['cashier_id'] = self.config['cashier_id']
-
                     s_res = requests.get(
-
                         f"{self.config['api_url']}/api/pos/shift",
-
                         headers={'Authorization': f"Bearer {self.config['pos_token']}", 'Accept': 'application/json'},
-
                         params=shift_params,
-
                         timeout=3
-
                     )
-
                     if s_res.status_code == 200:
-
                         s_data = s_res.json().get('shift')
-
                         if s_data and s_data.get('id'):
-
                             self.current_shift['id'] = s_data['id']
-
+                            self.current_shift['server_id'] = s_data['id']
                             session = init_db(f"sqlite:///{self.db_path}")
-
                             loc_id = self.current_shift.get('local_id')
-
                             if loc_id:
-
                                 loc_shift = session.query(PosShift).filter_by(id=loc_id).first()
-
                                 if loc_shift:
-
                                     loc_shift.server_id = s_data['id']
-
                                     loc_shift.sync_status = 'synced'
-
                                     session.commit()
-
                             session.close()
-
                 except Exception:
-
                     pass
 
-
-
-            # If local shift has no server id (offline shift), link it when online
-
-            if getattr(self, 'current_shift', None) and not self.current_shift.get('id'):
-
+            # If force_resume is requested, fetch and attach active ERP shift
+            if force_resume or (not getattr(self, 'current_shift', None) and show_resume_dialog):
                 try:
-
                     shift_params = {}
-
                     if self.config.get('branch_id'):
-
                         shift_params['branch_id'] = self.config['branch_id']
-
                     if self.config.get('cashier_id'):
-
                         shift_params['cashier_id'] = self.config['cashier_id']
-
                     s_res = requests.get(
-
                         f"{self.config['api_url']}/api/pos/shift",
-
                         headers={'Authorization': f"Bearer {self.config['pos_token']}", 'Accept': 'application/json'},
-
                         params=shift_params,
-
-                        timeout=3
-
+                        timeout=5
                     )
-
                     if s_res.status_code == 200:
-
                         s_data = s_res.json().get('shift')
-
                         if s_data and s_data.get('id'):
-
-                            self.current_shift['id'] = s_data['id']
-
+                            server_id = s_data['id']
                             session = init_db(f"sqlite:///{self.db_path}")
-
-                            loc_id = self.current_shift.get('local_id')
-
-                            if loc_id:
-
-                                loc_shift = session.query(PosShift).filter_by(id=loc_id).first()
-
-                                if loc_shift:
-
-                                    loc_shift.server_id = s_data['id']
-
-                                    loc_shift.sync_status = 'synced'
-
-                                    session.commit()
-
+                            loc_shift = session.query(PosShift).filter_by(server_id=server_id).first()
+                            if not loc_shift:
+                                loc_shift = PosShift(
+                                    server_id=server_id,
+                                    branch_id=self.config.get('branch_id'),
+                                    cashier_id=self.config.get('cashier_id'),
+                                    cashier_name=self.config.get('cashier_name'),
+                                    opening_cash=float(s_data.get('opening_cash', 0.0) or 0.0),
+                                    expected_cash=float(s_data.get('expected_cash', 0.0) or 0.0),
+                                    status='open',
+                                    sync_status='synced'
+                                )
+                                session.add(loc_shift)
+                                session.commit()
+                            local_id = loc_shift.id
                             session.close()
 
+                            self.current_shift = dict(s_data)
+                            self.current_shift['id'] = server_id
+                            self.current_shift['server_id'] = server_id
+                            self.current_shift['local_id'] = local_id
+
+                            self.shift_btn.setText("ปิดกะ")
+                            if hasattr(self, "branch_label"): self.branch_label.show()
+                            self.shift_btn.setStyleSheet("QPushButton { background-color: #3b82f6; border: none; color: white; padding: 5px 10px; border-radius: 6px; font-weight: bold;} QPushButton:hover { background-color: #2563eb; }")
                 except Exception:
-
                     pass
-
-
-
-            # Do not auto-open or silently resume shift. Cashier must manually open shift.
 
             if not getattr(self, 'current_shift', None):
-
                 self.shift_btn.setText("เปิดกะ")
-
                 self.shift_btn.setStyleSheet("QPushButton { background-color: #f59e0b; border: none; color: white; padding: 5px 10px; border-radius: 6px; font-weight: bold;} QPushButton:hover { background-color: #d97706; }")
-
-        except:
-
+        except Exception:
             pass
-
 
 
     def show_today_revenue(self):

@@ -210,7 +210,14 @@ class SyncWorker(QThread):
 
         try:
 
-            return session.query(Sale).filter(Sale.status.in_(['pending', 'failed'])).count()
+            sales_count = session.query(Sale).filter(Sale.status.in_(['pending', 'failed'])).count()
+            shifts_count = session.query(PosShift).filter(
+                PosShift.status == 'closed', PosShift.sync_status.in_(['pending', 'failed'])
+            ).count()
+            outbox_shifts = session.query(Outbox).filter(
+                Outbox.event_type == 'shift_close', Outbox.status.in_(['pending', 'failed'])
+            ).count()
+            return sales_count + max(shifts_count, outbox_shifts)
 
         except Exception:
 
@@ -331,6 +338,12 @@ class SyncWorker(QThread):
                             session.query(Sale).filter(Sale.status == 'failed').update(
 
                                 {'status': 'pending'}, synchronize_session=False
+
+                            )
+
+                            session.query(PosShift).filter(PosShift.sync_status == 'failed').update(
+
+                                {'sync_status': 'pending'}, synchronize_session=False
 
                             )
 
@@ -606,13 +619,38 @@ class SyncWorker(QThread):
 
         pending_count = session.query(Sale).filter(Sale.status.in_(['pending', 'failed'])).count()
 
-        pending_outbox_count = session.query(Outbox).filter(Outbox.status.in_(['pending', 'failed'])).count()
+        pending_outbox_count = session.query(Outbox).filter(
+            Outbox.event_type == 'sale_checkout', Outbox.status.in_(['pending', 'failed'])
+        ).count()
 
-        if pending_count == 0 and pending_outbox_count == 0:
+        pending_shifts_count = session.query(PosShift).filter(
+            PosShift.status == 'closed', PosShift.sync_status.in_(['pending', 'failed'])
+        ).count()
+
+        pending_shift_outbox = session.query(Outbox).filter(
+            Outbox.event_type == 'shift_close', Outbox.status.in_(['pending', 'failed'])
+        ).count()
+
+        if pending_count == 0 and pending_outbox_count == 0 and pending_shifts_count == 0 and pending_shift_outbox == 0:
 
             session.close()
 
-            return True, "ไม่มีบิลค้างส่ง"
+            return True, "ไม่มีบิลหรือกะค้างส่ง"
+
+        # หากไม่มีบิลขายค้าง แต่มีกะที่ปิดออฟไลน์ค้าง ให้ซิงค์ปิดกะทันที
+        if pending_count == 0 and pending_outbox_count == 0:
+
+            shift_ok = self._sync_pending_closed_shifts(session, headers)
+
+            updated_pending = self.get_pending_count()
+
+            self.pending_count_updated.emit(updated_pending)
+
+            session.close()
+
+            if shift_ok:
+                return True, "ซิงค์ปิดกะขึ้น ERP สำเร็จเรียบร้อย"
+            return False, "ซิงค์ปิดกะขึ้น ERP ไม่สำเร็จ" 
 
         # ตรวจสอบกะที่เปิดอยู่บนเซิร์ฟเวอร์ ERP
 
@@ -852,7 +890,7 @@ class SyncWorker(QThread):
 
             # 2. Process outbox queue
 
-            pending_outbox = session.query(Outbox).filter(Outbox.status.in_(['pending', 'failed'])).all()
+            pending_outbox = session.query(Outbox).filter(Outbox.event_type == 'sale_checkout', Outbox.status.in_(['pending', 'failed'])).all()
 
             failed_count = 0
 
@@ -1049,9 +1087,12 @@ class SyncWorker(QThread):
 
                 session.commit()
 
+            # 3. Process pending closed shifts after sales are synced
+            self._sync_pending_closed_shifts(session, headers)
+
             # Emit updated pending count to update badge
 
-            updated_pending = session.query(Sale).filter(Sale.status.in_(['pending', 'failed'])).count()
+            updated_pending = self.get_pending_count()
 
             self.pending_count_updated.emit(updated_pending)
 
@@ -1074,4 +1115,145 @@ class SyncWorker(QThread):
         finally:
 
             session.close()
+
+    def _sync_pending_closed_shifts(self, session, headers):
+        """
+        ซิงค์กะที่ปิดแบบออฟไลน์ขึ้นระบบ ERP หลังจากส่งบิลขายของกะนั้นเสร็จสิ้นแล้ว
+        """
+        try:
+            pending_close_outbox = session.query(Outbox).filter(
+                Outbox.event_type == 'shift_close',
+                Outbox.status.in_(['pending', 'failed'])
+            ).all()
+
+            pending_closed_shifts = session.query(PosShift).filter(
+                PosShift.status == 'closed',
+                PosShift.sync_status.in_(['pending', 'failed'])
+            ).all()
+
+            if not pending_close_outbox and not pending_closed_shifts:
+                return True
+
+            for shift in pending_closed_shifts:
+                target_server_id = shift.server_id
+                counted_cash = float(shift.counted_cash) if shift.counted_cash is not None else 0.0
+                closing_note = "ปิดกะออฟไลน์ (Auto-sync by SyncWorker)"
+
+                matching_ob = next(
+                    (ob for ob in pending_close_outbox if ob.aggregate_id in (str(shift.id), str(shift.server_id))),
+                    None
+                )
+                if matching_ob:
+                    try:
+                        p = json.loads(matching_ob.payload_json)
+                        if not target_server_id and p.get('shift_id'):
+                            target_server_id = p.get('shift_id')
+                        if 'counted_cash' in p:
+                            counted_cash = float(p.get('counted_cash'))
+                        if p.get('closing_note'):
+                            closing_note = p.get('closing_note')
+                    except Exception:
+                        pass
+
+                if not target_server_id:
+                    try:
+                        branch_id, cashier_id = self._resolve_branch_and_cashier(session)
+                        shift_params = {}
+                        if branch_id: shift_params['branch_id'] = branch_id
+                        if cashier_id: shift_params['cashier_id'] = cashier_id
+                        s_res = requests.get(
+                            f"{self.api_url}/api/pos/shift",
+                            headers=headers,
+                            params=shift_params,
+                            timeout=15
+                        )
+                        if s_res.status_code == 200:
+                            s_data = s_res.json().get('shift')
+                            if s_data and s_data.get('id'):
+                                target_server_id = s_data['id']
+                                shift.server_id = target_server_id
+                                session.commit()
+                    except Exception:
+                        pass
+
+                if not target_server_id:
+                    continue
+
+                close_body = {
+                    'shift_id': target_server_id,
+                    'counted_cash': counted_cash,
+                    'closing_note': closing_note
+                }
+
+                try:
+                    close_res = requests.post(
+                        f"{self.api_url}/api/pos/shift/close",
+                        headers=headers,
+                        json=close_body,
+                        timeout=25
+                    )
+                    if close_res.status_code == 200:
+                        shift.sync_status = 'synced'
+                        if matching_ob:
+                            matching_ob.status = 'synced'
+                            matching_ob.synced_at = datetime.utcnow()
+                        log = SyncLog(
+                            direction='push',
+                            sync_type='shift_close',
+                            record_count=1,
+                            status='success',
+                            message=f"Shift {target_server_id} successfully closed on ERP (counted: {counted_cash})"
+                        )
+                        session.add(log)
+                        session.commit()
+                    elif close_res.status_code == 422:
+                        res_json = close_res.json() if close_res.text else {}
+                        err_msg = str(res_json.get('message', close_res.text))
+                        if "ไม่พบกะที่เปิดอยู่" in err_msg or "ปิดไปแล้ว" in err_msg:
+                            shift.sync_status = 'synced'
+                            if matching_ob:
+                                matching_ob.status = 'synced'
+                                matching_ob.synced_at = datetime.utcnow()
+                            session.commit()
+                        else:
+                            shift.sync_status = 'failed'
+                            if matching_ob:
+                                matching_ob.status = 'failed'
+                                matching_ob.last_error = err_msg
+                            session.commit()
+                    else:
+                        shift.sync_status = 'failed'
+                        if matching_ob:
+                            matching_ob.status = 'failed'
+                            matching_ob.last_error = f"HTTP {close_res.status_code}"
+                        session.commit()
+                except Exception as ex:
+                    if matching_ob:
+                        matching_ob.last_error = str(ex)
+                    pass
+
+            for ob in pending_close_outbox:
+                if ob.status == 'pending':
+                    try:
+                        p = json.loads(ob.payload_json)
+                        sid = p.get('shift_id')
+                        cc = float(p.get('counted_cash', 0.0))
+                        cn = p.get('closing_note', "ปิดกะออฟไลน์")
+                        if sid:
+                            c_res = requests.post(
+                                f"{self.api_url}/api/pos/shift/close",
+                                headers=headers,
+                                json={'shift_id': sid, 'counted_cash': cc, 'closing_note': cn},
+                                timeout=20
+                            )
+                            if c_res.status_code in (200, 422):
+                                ob.status = 'synced'
+                                ob.synced_at = datetime.utcnow()
+                                session.commit()
+                    except Exception:
+                        pass
+
+            return True
+        except Exception as e:
+            return False
 

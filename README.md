@@ -1,4 +1,4 @@
-# PopCentral POS (v1.2.17)
+# PopCentral POS (v1.2.18)
 
 ระบบจุดขายหน้าร้านระดับพาณิชย์ (Commercial Desktop POS) พัฒนาด้วย **Python (PySide6 / Qt6)** และ **SQLAlchemy (SQLite)** ออกแบบตามสถาปัตยกรรม **Local-First & Offline-First** สามารถเปิดบิล ขายสินค้า ชั่งน้ำหนัก พิมพ์ใบเสร็จ และรับชำระเงินได้ตลอดเวลาแม้ไม่มีสัญญาณอินเทอร์เน็ต พร้อมระบบ Background Sync อัตโนมัติที่เชื่อมต่อกับ **PopStar ERP Backend**
 
@@ -47,11 +47,11 @@
 
 ## คู่มือและวิธีติดตั้งโปรแกรม (Installation Guide)
 
-สามารถดาวน์โหลดไฟล์ติดตั้งเวอร์ชันล่าสุดได้จากเมนู [Releases (v1.2.17)](https://github.com/nongpee321/posCentral/releases/tag/v1.2.17)
+สามารถดาวน์โหลดไฟล์ติดตั้งเวอร์ชันล่าสุดได้จากเมนู [Releases (v1.2.18)](https://github.com/nongpee321/posCentral/releases/tag/v1.2.18)
 
 ### ตัวเลือกที่ 1: ติดตั้งแบบตัวติดตั้งอัตโนมัติ (.exe Setup) — แนะนำสำหรับเครื่องหน้าร้าน
 
-1. ดาวน์โหลดไฟล์ `PopCentral-POS-UAT-1.2.17-setup.exe`
+1. ดาวน์โหลดไฟล์ `PopCentral-POS-UAT-1.2.18-setup.exe`
 2. ดับเบิลคลิกเปิดไฟล์ติดตั้ง
 3. เลือกตำแหน่งติดตั้ง (ค่าเริ่มต้น: `C:\PopCentral POS` หรือ `D:\PopCentral POS`)
 4. กดปุ่ม **Extract** หรือ **ติดตั้ง**
@@ -59,7 +59,7 @@
 
 ### ตัวเลือกที่ 2: ใช้งานแบบ Portable (.zip ไม่ต้องติดตั้ง)
 
-1. ดาวน์โหลดไฟล์ `PopCentral-POS-Central-UAT-1.2.17-portable.zip`
+1. ดาวน์โหลดไฟล์ `PopCentral-POS-Central-UAT-1.2.18-portable.zip`
 2. คลิกขวาที่ไฟล์ `.zip` แล้วเลือก **Extract All... (แตกไฟล์ทั้งหมด)** ไปยังโฟลเดอร์ที่ต้องการ เช่น `D:\PopCentral-POS-Central-UAT`
 3. ดับเบิลคลิกไฟล์ `PopCentral-POS-Central-UAT.exe` เพื่อเปิดใช้งานได้ทันที
 
@@ -111,7 +111,7 @@
 
 ![04. หน้าต่างขายสินค้าหลัก](assets/manual/04_pos_main_window.png)
 
-1. **แถบสถานะด้านบน**: แสดงเวอร์ชัน `v1.2.17`, สถานะ `ออนไลน์ (Online)`, นาฬิกา, ปุ่มปิดกะ, และปุ่มเมนู
+1. **แถบสถานะด้านบน**: แสดงเวอร์ชัน `v1.2.18`, สถานะ `ออนไลน์ (Online)`, นาฬิกา, ปุ่มปิดกะ, และปุ่มเมนู
 2. **ค้นหาและสแกนสินค้า**: ยิงบาร์โค้ด หรือพิมพ์ค้นหาชื่อสินค้า/รหัสสินค้า
 3. **หมวดหมู่สินค้า**: เลือกดูสินค้าตามประเภท เช่น หมูหมัก, ชิ้นส่วนหมู, ไก่สด, ไก่แช่แข็ง, ปลา, อาหารทะเล ฯลฯ
 
@@ -195,9 +195,9 @@ python main.py
 ## วิธี Build ตัวติดตั้ง (.exe) ด้วยตนเอง
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\build_pos.ps1 -Version "1.2.17"
+powershell -ExecutionPolicy Bypass -File .\build_pos.ps1 -Version "1.2.18"
 ```
-ไฟล์ติดตั้งสำเร็จรูปจะถูกสร้างไว้ที่ `dist\PopCentral-POS-UAT-1.2.17-setup.exe`
+ไฟล์ติดตั้งสำเร็จรูปจะถูกสร้างไว้ที่ `dist\PopCentral-POS-UAT-1.2.18-setup.exe`
 
 ---
 

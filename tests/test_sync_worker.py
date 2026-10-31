@@ -197,3 +197,75 @@ def test_auto_heal_discount_fields(tmp_path):
     # change_amount equals 10.0
     assert sent["change_amount"] == 10.0
 
+def test_offline_shift_close_sync(tmp_path):
+    import json
+    from database.models import PosShift, Outbox
+    import unittest.mock as mock
+
+    db_path = str(tmp_path / 'shift_close_test.db')
+    session = init_db(f'sqlite:///{db_path}')
+
+    # Create an offline closed shift
+    shift = PosShift(
+        server_id=6,
+        branch_id=6,
+        cashier_id=21,
+        opening_cash=500.0,
+        expected_cash=595.0,
+        counted_cash=595.0,
+        status='closed',
+        sync_status='pending'
+    )
+    session.add(shift)
+    session.flush()
+    shift_local_id = shift.id
+
+    outbox = Outbox(
+        event_type='shift_close',
+        aggregate_id='6',
+        idempotency_key='shift-close-6-12345',
+        payload_json=json.dumps({
+            'shift_id': 6,
+            'local_shift_id': shift_local_id,
+            'counted_cash': 595.0,
+            'closing_note': 'ปิดกะออฟไลน์ (Auto-sync)'
+        }),
+        status='pending'
+    )
+    session.add(outbox)
+    session.commit()
+    outbox_id = outbox.id
+    session.close()
+
+    worker = SyncWorker(db_path, 'http://localhost:8000', 'test_token')
+    assert worker.get_pending_count() == 1
+
+    posted_urls = []
+    posted_bodies = []
+
+    class MockCloseResponse:
+        status_code = 200
+        text = '{"success": true}'
+        def json(self):
+            return {'success': True, 'shift': {'id': 6, 'status': 'closed'}}
+
+    def mock_post(url, json=None, headers=None, timeout=None):
+        posted_urls.append(url)
+        posted_bodies.append(json)
+        return MockCloseResponse()
+
+    with mock.patch('requests.post', side_effect=mock_post):
+        ok, msg = worker._sync_outbox_sales()
+        assert ok is True
+
+    assert any('/api/pos/shift/close' in url for url in posted_urls)
+    close_req = next(body for body in posted_bodies if body.get('shift_id') == 6)
+    assert close_req['counted_cash'] == 595.0
+
+    session = init_db(f'sqlite:///{db_path}')
+    updated_shift = session.query(PosShift).filter_by(id=shift_local_id).first()
+    updated_outbox = session.query(Outbox).filter_by(id=outbox_id).first()
+    assert updated_shift.sync_status == 'synced'
+    assert updated_outbox.status == 'synced'
+    assert worker.get_pending_count() == 0
+    session.close()

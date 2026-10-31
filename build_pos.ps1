@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "1.2.17"
+    [string]$Version = "1.2.18"
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,7 +11,11 @@ $python = if (Test-Path (Join-Path $projectRoot "venv\Scripts\python.exe")) {
 }
 $sevenZip = "C:\Program Files\7-Zip\7z.exe"
 $sfxModule = "C:\Program Files\7-Zip\7z.sfx"
-$releaseDirectory = Join-Path (Split-Path -Parent (Split-Path -Parent $projectRoot)) "storage\app\pos-python-releases"
+$releaseDirectory = if (Test-Path "D:\pop-erp-food\ERPPOP-main\storage\app\pos-python-releases") {
+    "D:\pop-erp-food\ERPPOP-main\storage\app\pos-python-releases"
+} else {
+    Join-Path $projectRoot "dist"
+}
 $packageName = "PopCentral-POS-UAT-$Version-setup.exe"
 $distDirectory = Join-Path $projectRoot "dist"
 

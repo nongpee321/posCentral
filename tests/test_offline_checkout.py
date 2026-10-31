@@ -69,6 +69,9 @@ def test_existing_outbox_database_is_migrated(tmp_path):
 def test_checkout_is_saved_before_any_network_request(qtbot, tmp_path, monkeypatch):
     db_path = str(tmp_path / "local_first.db")
     window = MainWindow(db_path=db_path)
+    if hasattr(window, 'sync_worker') and window.sync_worker:
+        window.sync_worker.is_running = False
+        window.sync_worker.wait(500)
     qtbot.addWidget(window)
     window.config.update({
         "api_url": "http://erp.example",
