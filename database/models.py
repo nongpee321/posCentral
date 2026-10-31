@@ -108,6 +108,7 @@ class Sale(Base):
     
     # Metadata for offline receipt compatibility
     doc_number = Column(String(50), nullable=True)
+    discount_amount = Column(Float, nullable=True, default=0.0)
     payment_method = Column(String(20), nullable=False, default='cash')
     cash_amount = Column(Float, nullable=True, default=0.0)
     transfer_amount = Column(Float, nullable=True, default=0.0)
@@ -325,6 +326,10 @@ def init_db(db_path=None):
             outbox_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(outbox)").fetchall()}
             if 'payload_prepared' not in outbox_cols:
                 conn.exec_driver_sql("ALTER TABLE outbox ADD COLUMN payload_prepared BOOLEAN NOT NULL DEFAULT 0")
+
+            sales_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(sales)").fetchall()}
+            if 'discount_amount' not in sales_cols:
+                conn.exec_driver_sql("ALTER TABLE sales ADD COLUMN discount_amount FLOAT DEFAULT 0.0")
 
             # Indexes for instant search, barcode scan, and sync checks
             conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)")

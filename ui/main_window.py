@@ -1672,7 +1672,7 @@ class MainWindow(QMainWindow):
 
             if hasattr(self, 'customer_display') and self.customer_display and not self.customer_display.isHidden():
 
-                self.customer_display.update_cart(self.cart_table, grand_total)
+                self.customer_display.update_cart(self.cart_table, grand_total, subtotal=subtotal, discount=discount)
 
         except Exception as e:
 
@@ -1732,7 +1732,7 @@ class MainWindow(QMainWindow):
 
         
 
-        version_label = QLabel("v1.2.18")
+        version_label = QLabel("v1.2.19")
 
         version_label.setStyleSheet("font-size: 13px; color: #64748b; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 8px;")
 
@@ -4138,7 +4138,7 @@ class MainWindow(QMainWindow):
 
             if hasattr(self, 'customer_display') and self.customer_display and not self.customer_display.isHidden():
 
-                self.customer_display.show_payment(grand_total)
+                self.customer_display.show_payment("QR", override_amount=grand_total)
 
                 
 
@@ -4376,12 +4376,11 @@ class MainWindow(QMainWindow):
             mixed_transfer = transfer_amount
 
             if method_map.get(method) == 'cash':
-                # PosPaymentValidator requires cash_received >= gross sum of items
-                cash_received_payload = max(float(received_amount), float(total_amount))
+                cash_received_payload = max(float(received_amount), float(net_total))
                 change_amount_payload = max(0.0, float(cash_received_payload) - float(net_total))
             elif method_map.get(method) == 'mixed' and discount_applied > 0 and total_amount > 0:
-                # PosPaymentValidator requires cash_amount + transfer_amount == gross sum of items
-                diff = round(float(total_amount) - (float(mixed_cash) + float(mixed_transfer)), 2)
+                cur_mix_sum = float(mixed_cash) + float(mixed_transfer)
+                diff = round(float(net_total) - cur_mix_sum, 2)
                 if diff != 0:
                     mixed_cash = round(float(mixed_cash) + diff, 2)
 
@@ -4406,6 +4405,8 @@ class MainWindow(QMainWindow):
                 total_amount=net_total,
 
                 received_amount=received_amount,
+
+                discount_amount=discount_applied,
 
                 payment_method=method_map.get(method, 'cash'),
 
@@ -4481,9 +4482,11 @@ class MainWindow(QMainWindow):
 
                 "customer_address": cust_addr,
 
-                "discount_amount": discount_applied,
+                "discount_amount": float(discount_applied),
 
                 "manual_discount_amount": 0.0,
+
+                "is_offline_sync": True,
 
                 "items": sync_items
 

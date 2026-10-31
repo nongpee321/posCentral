@@ -36,3 +36,5 @@ Desktop.ini
 pos_offline.db
 pos.db-shm
 pos.db-wal
+
+release_dist/

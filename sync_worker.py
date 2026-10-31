@@ -915,9 +915,7 @@ class SyncWorker(QThread):
                             last4 = '0000'
                         payload['transfer_account_last4'] = last4
                         payload['payment_ref'] = payload.get('payment_ref') or last4
-                    entry.payload_json = json.dumps(payload)
                     entry.payload_prepared = True
-                    session.commit()
                 else:
                     # Auto-heal branch_id or shift_id if they don't match active terminal branch or if previous error was branch/shift invalid
                     current_branch_id = branch_id
@@ -940,68 +938,67 @@ class SyncWorker(QThread):
                                 sale.shift_id = current_shift_id
                             if cashier_id:
                                 sale.cashier_salesman_id = cashier_id
-                        entry.payload_json = json.dumps(payload)
-                        session.commit()
 
-                    # Auto-heal discount and items if bill had discount or was rejected by manager approval / pricing / shortfall
-                    sale_total = float(sale.total_amount if sale else (payload.get('cash_received') or 0.0))
-                    payload_items = payload.get('items') or []
-                    needs_discount_healing = (
-                        payload_items
-                        and (
-                            payload.get('manual_discount_amount', 0) > 0
-                            or payload.get('discount_amount', 0) > 0
-                            or (entry.last_error and any(err in entry.last_error for err in ('ส่วนลดพิเศษ', 'สิทธิ์อนุมัติ', 'ไม่ครบ', 'ราคาหรือส่วนลดเปลี่ยน')))
-                            or (sale and sale.sync_error and any(err in sale.sync_error for err in ('ส่วนลดพิเศษ', 'สิทธิ์อนุมัติ', 'ไม่ครบ', 'ราคาหรือส่วนลดเปลี่ยน')))
-                        )
+                # Ensure offline sync flag is present
+                payload['is_offline_sync'] = True
+
+                # Auto-heal discount and items if bill had discount or was rejected by manager approval / pricing / shortfall
+                sale_total = float(sale.total_amount if sale else (payload.get('cash_received') or 0.0))
+                payload_items = payload.get('items') or []
+                needs_discount_healing = (
+                    payload_items
+                    and (
+                        payload.get('manual_discount_amount', 0) > 0
+                        or payload.get('discount_amount', 0) > 0
+                        or (sale and getattr(sale, 'discount_amount', 0.0) and float(sale.discount_amount) > 0)
+                        or (entry.last_error and any(err in entry.last_error for err in ('ส่วนลดพิเศษ', 'สิทธิ์อนุมัติ', 'ไม่ครบ', 'ราคาหรือส่วนลดเปลี่ยน')))
+                        or (sale and sale.sync_error and any(err in sale.sync_error for err in ('ส่วนลดพิเศษ', 'สิทธิ์อนุมัติ', 'ไม่ครบ', 'ราคาหรือส่วนลดเปลี่ยน')))
                     )
+                )
 
-                    if needs_discount_healing:
-                        # Ensure items have standard catalog prices so PosPricingGuard passes with 0 discrepancy
-                        for it in payload_items:
-                            prod_id = it.get('product_id')
-                            if prod_id:
-                                prod_record = session.query(Product).filter_by(id=prod_id).first()
-                                if prod_record:
-                                    cat_price = float(prod_record.pos_price or prod_record.default_price or it.get('unit_price', 0.0))
-                                    if cat_price > 0 and abs(float(it.get('unit_price', 0.0)) - cat_price) > 0.01:
-                                        it['unit_price'] = cat_price
+                if needs_discount_healing:
+                    # Ensure items have standard catalog prices so PosPricingGuard passes with 0 discrepancy
+                    for it in payload_items:
+                        prod_id = it.get('product_id')
+                        if prod_id:
+                            prod_record = session.query(Product).filter_by(id=prod_id).first()
+                            if prod_record:
+                                cat_price = float(prod_record.pos_price or prod_record.default_price or it.get('unit_price', 0.0))
+                                if cat_price > 0 and abs(float(it.get('unit_price', 0.0)) - cat_price) > 0.01:
+                                    it['unit_price'] = cat_price
 
-                        gross_sum = sum(float(i.get('qty', 0) or 0) * float(i.get('unit_price', 0) or 0) for i in payload_items)
-                        discount_val = max(0.0, round(gross_sum - sale_total, 2)) if (sale_total > 0 and gross_sum > sale_total) else float(payload.get('discount_amount') or 0.0)
+                    gross_sum = sum(float(i.get('qty', 0) or 0) * float(i.get('unit_price', 0) or 0) for i in payload_items)
+                    discount_val = max(0.0, round(gross_sum - sale_total, 2)) if (sale_total > 0 and gross_sum > sale_total) else float(payload.get('discount_amount') or (getattr(sale, 'discount_amount', 0.0) if sale else 0.0) or 0.0)
 
-                        # Update discount fields: manual_discount_amount must be 0 so manager permission is never required
-                        payload['discount_amount'] = discount_val
-                        payload['manual_discount_amount'] = 0.0
+                    # Update discount fields: manual_discount_amount must be 0 so manager permission is never required
+                    payload['discount_amount'] = discount_val
+                    payload['manual_discount_amount'] = 0.0
 
-                        # Fix cash payments: PosPaymentValidator requires cash_received >= gross sum
-                        if payload.get('method') == 'cash':
-                            orig_received = float(payload.get('cash_received') or 0.0)
-                            if orig_received < gross_sum:
-                                payload['cash_received'] = gross_sum
-                                payload['change_amount'] = max(0.0, round(gross_sum - sale_total, 2))
+                    # Fix cash payments: PosPaymentValidator requires cash_received >= gross sum
+                    if payload.get('method') == 'cash':
+                        orig_received = float(payload.get('cash_received') or 0.0)
+                        if orig_received < gross_sum:
+                            payload['cash_received'] = gross_sum
+                            payload['change_amount'] = max(0.0, round(gross_sum - sale_total, 2))
 
-                        # Fix mixed payments: cash_amount + transfer_amount == gross_sum
-                        if payload.get('method') == 'mixed' and gross_sum > 0:
-                            cur_mix_sum = float(payload.get('cash_amount') or 0.0) + float(payload.get('transfer_amount') or 0.0)
-                            diff = round(gross_sum - cur_mix_sum, 2)
-                            if abs(diff) > 0.01:
-                                payload['cash_amount'] = round(float(payload.get('cash_amount') or 0.0) + diff, 2)
+                    # Fix mixed payments: cash_amount + transfer_amount == gross_sum
+                    if payload.get('method') == 'mixed' and gross_sum > 0:
+                        cur_mix_sum = float(payload.get('cash_amount') or 0.0) + float(payload.get('transfer_amount') or 0.0)
+                        diff = round(gross_sum - cur_mix_sum, 2)
+                        if abs(diff) > 0.01:
+                            payload['cash_amount'] = round(float(payload.get('cash_amount') or 0.0) + diff, 2)
 
-                        entry.payload_json = json.dumps(payload)
-                        session.commit()
+                # If transfer or mixed, ensure transfer validation fields are present
+                if payload.get('method') in ('transfer', 'mixed'):
+                    payload['payment_confirmed'] = True
+                    last4 = payload.get('transfer_account_last4') or payload.get('payment_ref') or '0000'
+                    if not (isinstance(last4, str) and last4.isdigit() and len(last4) == 4):
+                        last4 = '0000'
+                    payload['transfer_account_last4'] = last4
+                    payload['payment_ref'] = payload.get('payment_ref') or last4
 
-                    # If already prepared but missing transfer validation fields, fix them
-                    if payload.get('method') in ('transfer', 'mixed'):
-                        payload['payment_confirmed'] = True
-                        if not payload.get('transfer_account_last4') or not payload.get('payment_ref'):
-                            last4 = payload.get('transfer_account_last4') or payload.get('payment_ref') or '0000'
-                            if not (isinstance(last4, str) and last4.isdigit() and len(last4) == 4):
-                                last4 = '0000'
-                            payload['transfer_account_last4'] = last4
-                            payload['payment_ref'] = payload.get('payment_ref') or last4
-                            entry.payload_json = json.dumps(payload)
-                            session.commit()
+                entry.payload_json = json.dumps(payload)
+                session.commit()
                 req_headers = dict(headers)
 
                 req_headers['Idempotency-Key'] = entry.idempotency_key

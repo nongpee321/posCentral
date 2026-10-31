@@ -325,18 +325,25 @@ class CustomerDisplayWindow(QMainWindow):
         else:
             self.qr_timer_lbl.setText("หมดเวลาชำระเงิน")
 
-    def update_cart(self, table_widget, total_amount):
-        self.current_total = total_amount
+    def update_cart(self, table_widget, total_amount, subtotal=0.0, discount=0.0):
+        total_val = float(total_amount or 0.0)
+        disc_val = float(discount or 0.0)
+        self.current_total = total_val
         self.qr_box.hide()
         self.spacer_widget.show()
         
-        self.total_lbl.setText(f"{total_amount:,.2f}")
+        self.total_lbl.setText(f"{total_val:,.2f}")
         self.total_lbl.setStyleSheet("font-size: 42px; font-weight: 900; color: #dc2626; border: none; font-family: Arial;")
+        self.disc_lbl.setText(f"{disc_val:,.2f} ฿")
         
-        sub = total_amount / 1.07
-        vat = total_amount - sub
-        self.subtotal_lbl.setText(f"{sub:,.2f} ฿")
-        self.vat_lbl.setText(f"{vat:,.2f} ฿")
+        if total_val > 0:
+            sub = total_val / 1.07
+            vat = total_val - sub
+            self.subtotal_lbl.setText(f"{sub:,.2f} ฿")
+            self.vat_lbl.setText(f"{vat:,.2f} ฿")
+        else:
+            self.subtotal_lbl.setText("0.00 ฿")
+            self.vat_lbl.setText("0.00 ฿")
         
         self.table.setRowCount(0)
         rows = table_widget.rowCount()
@@ -382,6 +389,9 @@ class CustomerDisplayWindow(QMainWindow):
         return pixmap
 
     def show_payment(self, method="QR", override_amount=None):
+        if isinstance(method, (int, float)):
+            override_amount = float(method)
+            method = "QR"
         if method == "QR":
             try:
                 amt = override_amount if override_amount is not None else self.current_total
@@ -402,6 +412,9 @@ class CustomerDisplayWindow(QMainWindow):
         self.spacer_widget.show()
         self.total_lbl.setStyleSheet("font-size: 42px; font-weight: 900; color: #10b981; border: none; font-family: Arial;")
         self.total_lbl.setText(f"{change:,.2f}")
+        self.disc_lbl.setText("0.00 ฿")
+        self.subtotal_lbl.setText("0.00 ฿")
+        self.vat_lbl.setText("0.00 ฿")
 
     def toggle_fullscreen(self):
         if self.isFullScreen():
