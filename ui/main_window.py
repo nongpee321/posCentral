@@ -12,7 +12,9 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 
                                QGridLayout, QScrollArea, QFrame, QTableWidget, QHeaderView,
 
-                               QInputDialog, QMessageBox, QTableWidgetItem, QDialog, QListWidget, QListWidgetItem)
+                               QInputDialog, QMessageBox, QTableWidgetItem, QDialog, QListWidget, QListWidgetItem,
+
+                               QSplitter)
 
 from PySide6.QtCore import Qt, QTimer
 
@@ -322,31 +324,91 @@ class MainWindow(QMainWindow):
 
         
 
-        # 2. Main Content (Left: Products, Right: Cart)
+        # 2. Main Content (Left: Products, Right: Cart) with draggable QSplitter
 
-        content_layout = QHBoxLayout()
+        self.main_splitter = QSplitter(Qt.Horizontal)
 
-        content_layout.setSpacing(10)
+        self.main_splitter.setObjectName("mainSplitter")
 
-        
+        self.main_splitter.setHandleWidth(10)
 
-        # Left Panel (Products)
+        self.main_splitter.setChildrenCollapsible(False)
+
+        self.main_splitter.setOpaqueResize(True)
+
+        self.main_splitter.setStyleSheet("""
+
+            QSplitter#mainSplitter::handle {
+
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #f1f5f9, stop:0.5 #cbd5e1, stop:1 #f1f5f9);
+
+                border: 1px solid #cbd5e1;
+
+                border-radius: 4px;
+
+                margin: 4px 1px;
+
+            }
+
+            QSplitter#mainSplitter::handle:hover {
+
+                background: #0284c7;
+
+                border: 1px solid #0369a1;
+
+            }
+
+            QSplitter#mainSplitter::handle:pressed {
+
+                background: #0369a1;
+
+                border: 1px solid #075985;
+
+            }
+
+        """)
+
+
 
         left_panel = self.create_products_panel()
 
-        content_layout.addWidget(left_panel, 6) # 60% width
+        left_panel.setMinimumWidth(320)
 
-        
+        self.main_splitter.addWidget(left_panel)
 
-        # Right Panel (Cart)
+
 
         right_panel = self.create_cart_panel()
 
-        content_layout.addWidget(right_panel, 4) # 40% width
+        right_panel.setMinimumWidth(360)
 
-        
+        self.main_splitter.addWidget(right_panel)
 
-        main_layout.addLayout(content_layout)
+
+
+        self.main_splitter.setStretchFactor(0, 1)
+
+        self.main_splitter.setStretchFactor(1, 1)
+
+
+
+        saved_sizes = self.config.get('splitter_sizes')
+
+        if saved_sizes and isinstance(saved_sizes, list) and len(saved_sizes) == 2 and all(isinstance(s, int) and s > 50 for s in saved_sizes):
+
+            self.main_splitter.setSizes(saved_sizes)
+
+        else:
+
+            self.main_splitter.setSizes([520, 480])
+
+
+
+        self.main_splitter.splitterMoved.connect(self._on_splitter_moved)
+
+
+
+        main_layout.addWidget(self.main_splitter, 1)
 
 
 
@@ -670,350 +732,232 @@ class MainWindow(QMainWindow):
 
 
 
-    def render_products_grid(self, cat_id=None, limit=60, offset=0, search_query=None):
+    def _calculate_grid_cols(self):
+        viewport_w = self.prod_scroll.viewport().width() if hasattr(self, 'prod_scroll') and self.prod_scroll else 0
+        if viewport_w < 150:
+            viewport_w = getattr(self, 'prod_container', None).width() if hasattr(self, 'prod_container') and self.prod_container else 460
+        btn_w = 120
+        spacing = 8
+        cols = max(2, min(8, (viewport_w - 10) // (btn_w + spacing)))
+        return cols
 
+    def _rearrange_product_grid(self):
+        if not hasattr(self, 'prod_scroll') or not hasattr(self, 'prod_grid'):
+            return
+        cols = self._calculate_grid_cols()
+        if getattr(self, '_current_grid_cols', None) == cols:
+            return
+        self._current_grid_cols = cols
+
+        widgets = []
+        while self.prod_grid.count():
+            item = self.prod_grid.takeAt(0)
+            if item and item.widget():
+                widgets.append(item.widget())
+
+        row, col = 0, 0
+        for w in widgets:
+            self.prod_grid.addWidget(w, row, col)
+            col += 1
+            if col >= cols:
+                col = 0
+                row += 1
+
+    def _on_splitter_moved(self, pos, index):
+        if hasattr(self, 'main_splitter'):
+            self.config['splitter_sizes'] = self.main_splitter.sizes()
+            self._rearrange_product_grid()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._rearrange_product_grid()
+
+    def render_products_grid(self, cat_id=None, limit=60, offset=0, search_query=None):
         """เรนเดอร์รายการสินค้าลงในตารางแบบจำกัดจำนวน (Page-based) เพื่อความเร็วสูงสุดและไม่ค้าง/ไม่เด้ง"""
+        if hasattr(self, 'prod_container') and self.prod_container:
+            self.prod_container.setUpdatesEnabled(False)
 
         # Clear existing product buttons safely
-
         while self.prod_grid.count():
-
             item = self.prod_grid.takeAt(0)
-
             w = item.widget()
-
             if w:
-
                 w.hide()
-
                 w.setParent(None)
-
                 w.deleteLater()
 
-
-
         session = init_db(f'sqlite:///{self.db_path}')
-
         try:
-
             query = session.query(Product).filter(Product.is_active == True)
-
             clean_sq = str(search_query or '').strip()
-
             if clean_sq:
-
                 from sqlalchemy import or_
-
                 sq = f"%{clean_sq}%"
-
                 matching_pids = [
-
                     row[0] for row in session.query(ProductBarcode.product_id)
-
-                    .filter(ProductBarcode.barcode.like(sq)).all()
-
+                    .filter(ProductBarcode.barcode.like(sq)).limit(50).all()
                 ]
-
                 query = query.filter(or_(
-
                     Product.name_th.like(sq),
-
                     Product.sku_code.like(sq),
-
                     Product.barcode.like(sq),
-
                     Product.id.in_(matching_pids)
-
                 ))
-
             elif cat_id is not None:
-
                 query = query.filter(Product.category_id == cat_id)
 
-
-
             total_count = query.count()
-
             products = query.order_by(Product.name_th).offset(offset).limit(limit).all()
 
-
-
+            cols = self._calculate_grid_cols()
+            self._current_grid_cols = cols
             row, col = 0, 0
-
             for p in products:
-
                 price_to_show = p.pos_price if p.pos_price is not None and p.pos_price > 0 else p.default_price
-
                 is_promo = bool(getattr(p, 'is_promotion', False))
-
                 if is_promo:
-
                     btn_text = f"{p.name_th}\n\n฿{price_to_show:.2f} (ลดพิเศษ)"
-
                     btn_style = """
-
                         QPushButton { background-color: #fff1f2; color: #e11d48; border: 2px solid #f43f5e; border-radius: 8px; font-size: 13px; font-weight: bold; }
-
                         QPushButton:hover { border: 2px solid #be123c; background-color: #ffe4e6; }
-
                     """
-
                 else:
-
                     btn_text = f"{p.name_th}\n\n฿{price_to_show:.2f}"
-
                     btn_style = """
-
                         QPushButton { background-color: white; color: #1e293b; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 13px; font-weight: bold; }
-
                         QPushButton:hover { border: 2px solid #0284c7; background-color: #f0f9ff; }
-
                     """
-
                 prod_btn = QPushButton(btn_text)
-
-                prod_btn.setFixedSize(130, 130)
-
+                prod_btn.setFixedSize(120, 120)
                 prod_btn.setToolTip(p.name_th)
-
                 prod_btn.setStyleSheet(btn_style)
 
-
-
                 p_dict = {
-
                     'id': p.id,
-
                     'sku_code': str(p.sku_code),
-
                     'name_th': str(p.name_th),
-
                     'default_price': float(p.default_price or 0.0),
-
                     'pos_price': float(p.pos_price) if p.pos_price is not None else None,
-
                     'is_promotion': is_promo,
-
                     'is_scale_item': bool(p.is_scale_item),
-
                     'stock_qty': float(p.stock_qty) if p.stock_qty is not None else 999999,
-
                 }
-
                 prod_btn.clicked.connect(lambda checked=False, item=p_dict: self.handle_product_click(item))
-
                 self.prod_grid.addWidget(prod_btn, row, col)
-
                 col += 1
-
-                if col > 3:
-
+                if col >= cols:
                     col = 0
-
                     row += 1
-
-
 
             # ถ้ายังมีสินค้าเหลือ ให้แสดงปุ่มโหลดเพิ่มเติม
-
             remaining = total_count - (offset + len(products))
-
             if remaining > 0:
-
                 more_btn = QPushButton(f"ดูสินค้าเพิ่มเติม\n(เหลืออีก {remaining} รายการ)")
-
-                more_btn.setFixedSize(130, 130)
-
+                more_btn.setFixedSize(120, 120)
                 more_btn.setStyleSheet("""
-
                     QPushButton { background-color: #f0f9ff; color: #0284c7; border: 2px dashed #0284c7; border-radius: 8px; font-size: 13px; font-weight: bold; }
-
                     QPushButton:hover { background-color: #e0f2fe; border: 2px solid #0284c7; }
-
                 """)
-
                 more_btn.clicked.connect(lambda: self.load_more_products(cat_id, limit, offset + limit))
-
                 self.prod_grid.addWidget(more_btn, row, col)
-
         finally:
-
+            if hasattr(self, 'prod_container') and self.prod_container:
+                self.prod_container.setUpdatesEnabled(True)
             session.close()
 
-
-
     def load_more_products(self, cat_id, limit, next_offset, search_query=None):
-
         """โหลดสินค้าแถวถัดไปมาต่อท้ายโดยไม่ต้องโหลดใหม่ทั้งหมด"""
-
         # ลบปุ่ม "ดูสินค้าเพิ่มเติม" ตัวเดิมออก
-
         if self.prod_grid.count() > 0:
-
             last_item = self.prod_grid.takeAt(self.prod_grid.count() - 1)
-
             w = last_item.widget()
-
             if w:
-
                 w.hide()
-
                 w.setParent(None)
-
                 w.deleteLater()
 
-
+        if hasattr(self, 'prod_container') and self.prod_container:
+            self.prod_container.setUpdatesEnabled(False)
 
         session = init_db(f'sqlite:///{self.db_path}')
-
         try:
-
             query = session.query(Product).filter(Product.is_active == True)
-
             clean_sq = str(search_query or '').strip()
-
             if clean_sq:
-
                 from sqlalchemy import or_
-
                 sq = f"%{clean_sq}%"
-
                 matching_pids = [
-
                     row[0] for row in session.query(ProductBarcode.product_id)
-
-                    .filter(ProductBarcode.barcode.like(sq)).all()
-
+                    .filter(ProductBarcode.barcode.like(sq)).limit(50).all()
                 ]
-
                 query = query.filter(or_(
-
                     Product.name_th.like(sq),
-
                     Product.sku_code.like(sq),
-
                     Product.barcode.like(sq),
-
                     Product.id.in_(matching_pids)
-
                 ))
-
             elif cat_id is not None:
-
                 query = query.filter(Product.category_id == cat_id)
 
-
-
             total_count = query.count()
-
             products = query.order_by(Product.name_th).offset(next_offset).limit(limit).all()
 
-
-
+            cols = self._calculate_grid_cols()
+            self._current_grid_cols = cols
             current_count = self.prod_grid.count()
-
-            row = current_count // 4
-
-            col = current_count % 4
-
-
+            row = current_count // cols
+            col = current_count % cols
 
             for p in products:
-
                 price_to_show = p.pos_price if p.pos_price is not None and p.pos_price > 0 else p.default_price
-
                 is_promo = bool(getattr(p, 'is_promotion', False))
-
                 if is_promo:
-
                     btn_text = f"{p.name_th}\n\n฿{price_to_show:.2f} (ลดพิเศษ)"
-
                     btn_style = """
-
                         QPushButton { background-color: #fff1f2; color: #e11d48; border: 2px solid #f43f5e; border-radius: 8px; font-size: 13px; font-weight: bold; }
-
                         QPushButton:hover { border: 2px solid #be123c; background-color: #ffe4e6; }
-
                     """
-
                 else:
-
                     btn_text = f"{p.name_th}\n\n฿{price_to_show:.2f}"
-
                     btn_style = """
-
                         QPushButton { background-color: white; color: #1e293b; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 13px; font-weight: bold; }
-
                         QPushButton:hover { border: 2px solid #0284c7; background-color: #f0f9ff; }
-
                     """
-
                 prod_btn = QPushButton(btn_text)
-
-                prod_btn.setFixedSize(130, 130)
-
+                prod_btn.setFixedSize(120, 120)
                 prod_btn.setToolTip(p.name_th)
-
                 prod_btn.setStyleSheet(btn_style)
 
-
-
                 p_dict = {
-
                     'id': p.id,
-
                     'sku_code': str(p.sku_code),
-
                     'name_th': str(p.name_th),
-
                     'default_price': float(p.default_price or 0.0),
-
                     'pos_price': float(p.pos_price) if p.pos_price is not None else None,
-
                     'is_promotion': is_promo,
-
                     'is_scale_item': bool(p.is_scale_item),
-
                     'stock_qty': float(p.stock_qty) if p.stock_qty is not None else 999999,
-
                 }
-
                 prod_btn.clicked.connect(lambda checked=False, item=p_dict: self.handle_product_click(item))
-
                 self.prod_grid.addWidget(prod_btn, row, col)
-
                 col += 1
-
-                if col > 3:
-
+                if col >= cols:
                     col = 0
-
                     row += 1
 
-
-
             remaining = total_count - (next_offset + len(products))
-
             if remaining > 0:
-
                 more_btn = QPushButton(f"ดูสินค้าเพิ่มเติม\n(เหลืออีก {remaining} รายการ)")
-
-                more_btn.setFixedSize(130, 130)
-
+                more_btn.setFixedSize(120, 120)
                 more_btn.setStyleSheet("""
-
                     QPushButton { background-color: #f0f9ff; color: #0284c7; border: 2px dashed #0284c7; border-radius: 8px; font-size: 13px; font-weight: bold; }
-
                     QPushButton:hover { background-color: #e0f2fe; border: 2px solid #0284c7; }
-
                 """)
-
                 more_btn.clicked.connect(lambda: self.load_more_products(cat_id, limit, next_offset + limit))
-
                 self.prod_grid.addWidget(more_btn, row, col)
-
         finally:
-
+            if hasattr(self, 'prod_container') and self.prod_container:
+                self.prod_container.setUpdatesEnabled(True)
             session.close()
 
 
@@ -1113,14 +1057,28 @@ class MainWindow(QMainWindow):
 
     def on_search_text_changed(self, text):
         clean_text = str(text or "").strip()
-        if len(clean_text) >= 1:
-            self._update_search_suggestions(clean_text)
-            self.render_products_grid(search_query=clean_text)
-        else:
+        if not clean_text:
+            if hasattr(self, '_search_debounce_timer') and self._search_debounce_timer.isActive():
+                self._search_debounce_timer.stop()
             if hasattr(self, 'suggestions_list'):
                 self.suggestions_list.clear()
                 self.suggestions_list.hide()
-            self.render_products_grid(cat_id=getattr(self, 'selected_category_id', None))
+            self.render_products_grid(cat_id=getattr(self, 'current_cat_id', getattr(self, 'selected_category_id', None)))
+            return
+
+        if not hasattr(self, '_search_debounce_timer'):
+            self._search_debounce_timer = QTimer(self)
+            self._search_debounce_timer.setSingleShot(True)
+            self._search_debounce_timer.timeout.connect(self._do_debounced_search)
+
+        self._pending_search_text = clean_text
+        self._search_debounce_timer.start(200)
+
+    def _do_debounced_search(self):
+        clean_text = getattr(self, '_pending_search_text', '')
+        if clean_text:
+            self._update_search_suggestions(clean_text)
+            self.render_products_grid(search_query=clean_text)
 
     def _update_search_suggestions(self, clean_text):
         if not hasattr(self, 'suggestions_list'):
@@ -1201,6 +1159,8 @@ class MainWindow(QMainWindow):
             self.render_products_grid(cat_id=getattr(self, 'selected_category_id', None))
 
     def handle_barcode_scan(self):
+        if hasattr(self, '_search_debounce_timer') and self._search_debounce_timer.isActive():
+            self._search_debounce_timer.stop()
 
         if hasattr(self, 'suggestions_list') and self.suggestions_list.isVisible():
             if self.suggestions_list.count() == 1:
@@ -2042,7 +2002,7 @@ class MainWindow(QMainWindow):
 
         
 
-        version_label = QLabel("v1.2.25")
+        version_label = QLabel("v1.2.26")
 
         version_label.setStyleSheet("font-size: 13px; color: #64748b; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 8px;")
 
@@ -3297,11 +3257,27 @@ class MainWindow(QMainWindow):
 
         cat_scroll.setWidgetResizable(True)
 
-        cat_scroll.setFixedHeight(75)
+        cat_scroll.setFixedHeight(65)
 
-        cat_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; } QWidget#catWidget { background: transparent; }")
+        cat_scroll.setStyleSheet("""
+            QScrollArea { border: none; background: transparent; }
+            QWidget#catWidget { background: transparent; }
+            QScrollBar:horizontal {
+                height: 6px;
+                background: #f1f5f9;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #cbd5e1;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #94a3b8;
+            }
+        """)
 
         cat_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        cat_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
         
 
@@ -3325,27 +3301,29 @@ class MainWindow(QMainWindow):
 
         # Products Grid
 
-        prod_scroll = QScrollArea()
+        self.prod_scroll = QScrollArea()
 
-        prod_scroll.setWidgetResizable(True)
+        self.prod_scroll.setWidgetResizable(True)
 
-        prod_scroll.setStyleSheet("border: none; background: #f8fafc;")
+        self.prod_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-        
-
-        prod_container = QWidget()
-
-        self.prod_grid = QGridLayout(prod_container)
-
-        self.prod_grid.setSpacing(10)
-
-        self.prod_grid.setContentsMargins(0, 10, 0, 0)
+        self.prod_scroll.setStyleSheet("border: none; background: #f8fafc;")
 
         
 
-        prod_scroll.setWidget(prod_container)
+        self.prod_container = QWidget()
 
-        layout.addWidget(prod_scroll)
+        self.prod_grid = QGridLayout(self.prod_container)
+
+        self.prod_grid.setSpacing(8)
+
+        self.prod_grid.setContentsMargins(0, 8, 0, 0)
+
+        
+
+        self.prod_scroll.setWidget(self.prod_container)
+
+        layout.addWidget(self.prod_scroll)
 
         
 
@@ -5263,47 +5241,36 @@ class MainWindow(QMainWindow):
 
 
 
-if __name__ == "__main__":
-
-    app = QApplication(sys.argv)
-
-    window = MainWindow()
-
-    window.show()
-
-    sys.exit(app.exec())
-
-
-
     def closeEvent(self, event):
-
         try:
-
-            if hasattr(self, 'sync_worker') and self.sync_worker and self.sync_worker.isRunning():
-
-                self.sync_worker.is_running = False
-
-                if hasattr(self.sync_worker, '_wake_event'):
-
-                    self.sync_worker._wake_event.set()
-
-                self.sync_worker.quit()
-
-                self.sync_worker.wait(2000)
-
+            if hasattr(self, 'main_splitter'):
+                self.config['splitter_sizes'] = self.main_splitter.sizes()
+                self.save_config()
         except Exception:
-
             pass
 
         try:
-
-            if hasattr(self, 'customer_display') and self.customer_display:
-
-                self.customer_display.close()
-
+            if hasattr(self, 'sync_worker') and self.sync_worker and self.sync_worker.isRunning():
+                self.sync_worker.is_running = False
+                if hasattr(self.sync_worker, '_wake_event'):
+                    self.sync_worker._wake_event.set()
+                self.sync_worker.quit()
+                self.sync_worker.wait(2000)
         except Exception:
+            pass
 
+        try:
+            if hasattr(self, 'customer_display') and self.customer_display:
+                self.customer_display.close()
+        except Exception:
             pass
 
         event.accept()
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
 

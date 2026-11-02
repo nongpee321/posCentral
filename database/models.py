@@ -383,6 +383,8 @@ def init_db(db_path=None):
             # Indexes for instant search, barcode scan, and sync checks
             conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)")
             conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku_code)")
+            conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_products_name_th ON products(name_th)")
+            conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_products_active ON products(is_active)")
             conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_products_cat_active ON products(category_id, is_active)")
             conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_pb_barcode ON product_barcodes(barcode)")
             conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_pb_barcode_norm ON product_barcodes(barcode_norm)")
