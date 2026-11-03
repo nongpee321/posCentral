@@ -2918,39 +2918,79 @@ class MainWindow(QMainWindow):
 
 
     def show_today_revenue(self):
-        from datetime import datetime
+        from datetime import datetime, timezone, timedelta
         from collections import defaultdict
         session = init_db(f"sqlite:///{self.db_path}")
-        now = datetime.now()
+        
+        # Today's date in Thailand timezone (UTC+7)
+        tz_th = timezone(timedelta(hours=7))
+        now_th = datetime.now(tz_th)
+        today_date = now_th.date()
+
+        def to_thai_dt(val):
+            if not val:
+                return None
+            if isinstance(val, str):
+                try:
+                    val = datetime.strptime(val.split('.')[0], "%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    return None
+            if getattr(val, 'tzinfo', None) is None:
+                val = val.replace(tzinfo=timezone.utc)
+            return val.astimezone(tz_th)
+
+        # 1. Fetch all shifts from database
+        raw_shifts = session.query(PosShift).all()
+        shift_candidates = []
+        for s in raw_shifts:
+            th_dt = to_thai_dt(getattr(s, 'opened_at', None))
+            shift_candidates.append({
+                'id': s.id,
+                'server_id': getattr(s, 'server_id', None),
+                'opened_at': th_dt,
+                'model': s
+            })
+
+        # Helper to resolve sale.shift_id to the actual PosShift object
+        def resolve_shift_for_sale(sale_shift_id):
+            if not sale_shift_id:
+                return None
+            # Find shifts matching either local primary key or server ID
+            matches = [
+                s for s in shift_candidates
+                if (s['id'] == sale_shift_id or s['server_id'] == sale_shift_id or str(s['id']) == str(sale_shift_id) or str(s['server_id']) == str(sale_shift_id))
+            ]
+            # Prioritize matching shift that was opened today
+            today_matches = [s for s in matches if s['opened_at'] and s['opened_at'].date() == today_date]
+            if today_matches:
+                return today_matches[-1]
+            return matches[-1] if matches else None
+
+        # 2. Collect sales that occurred today in Thailand time
         today_sales = []
         for sale in session.query(Sale).all():
-            dt = sale.created_at
-            if isinstance(dt, str):
-                try:
-                    dt = datetime.strptime(dt.split('.')[0], "%Y-%m-%d %H:%M:%S")
-                except Exception:
-                    continue
-            if dt and dt.date() == now.date():
-                today_sales.append(sale)
+            th_dt = to_thai_dt(sale.created_at)
+            if th_dt and th_dt.date() == today_date:
+                today_sales.append((sale, th_dt))
 
-        active_sales = [s for s in today_sales if s.status != 'cancelled']
-        today_total = sum(float(s.total_amount or 0) for s in active_sales)
+        active_sales = [(s, dt) for (s, dt) in today_sales if s.status != 'cancelled']
+        today_total = sum(float(s.total_amount or 0) for (s, _) in active_sales)
         today_count = len(active_sales)
-        void_count = sum(1 for s in today_sales if s.status == 'cancelled')
+        void_count = sum(1 for (s, _) in today_sales if s.status == 'cancelled')
+
+        # 3. Group active sales by resolved shift ID
         grouped = defaultdict(list)
-        for sale in active_sales:
-            grouped[sale.shift_id].append(sale)
+        for (sale, sale_dt) in active_sales:
+            resolved = resolve_shift_for_sale(sale.shift_id)
+            group_key = resolved['id'] if resolved else sale.shift_id
+            grouped[group_key].append((sale, sale_dt, resolved))
+
         shift_rows = []
-        shift_groups = []
-        for shift_id, sales in grouped.items():
-            shift = session.query(PosShift).filter_by(id=shift_id).first() if shift_id else None
-            opened_at = getattr(shift, 'opened_at', None) if shift else None
-            if opened_at:
-                from datetime import timedelta
-                opened_at = opened_at + timedelta(hours=7)
-            shift_groups.append((shift_id, sales, shift, opened_at))
-        shift_groups.sort(key=lambda row: (row[3] is None, row[3] or datetime.max))
-        for shift_id, sales, shift, opened_at in shift_groups:
+        for group_key, items in grouped.items():
+            sales_list = [it[0] for it in items]
+            resolved_info = items[0][2]
+            opened_at = resolved_info['opened_at'] if resolved_info else items[0][1]
+
             hour = opened_at.hour if opened_at else None
             if hour is None:
                 label = "กะไม่ระบุเวลา"
@@ -2962,10 +3002,19 @@ class MainWindow(QMainWindow):
                 label = "กะเย็น"
             else:
                 label = "กะดึก"
+
             terminal = self.config.get('terminal_code') or self.config.get('device_id') or 'B001'
-            shift_code = getattr(shift, 'server_id', None) or shift_id or '-'
+            shift_code = (resolved_info['server_id'] if resolved_info and resolved_info['server_id'] else (resolved_info['id'] if resolved_info else group_key)) or '-'
             opened_text = opened_at.strftime('%H:%M') if opened_at else '--:--'
-            shift_rows.append({'label': f"{label} • กะ #{shift_code} • เปิด {opened_text} • {terminal}", 'sales': sales, 'total': sum(float(s.total_amount or 0) for s in sales)})
+            shift_rows.append({
+                'label': f"{label} • กะ #{shift_code} • เปิด {opened_text} • {terminal}",
+                'sales': sales_list,
+                'total': sum(float(s.total_amount or 0) for s in sales_list),
+                'opened_at': opened_at
+            })
+
+        # Sort chronologically by shift opening time
+        shift_rows.sort(key=lambda row: (row['opened_at'] is None, row['opened_at'] or datetime.max.replace(tzinfo=tz_th)))
         session.close()
 
         dlg = QDialog(self)
@@ -2986,8 +3035,8 @@ class MainWindow(QMainWindow):
             row = item.data(Qt.UserRole)
             detail_lines = [f"{row['label']} | {len(row['sales'])} บิล | รวม ฿ {row['total']:,.2f}"]
             for sale in row['sales']:
-                dt = getattr(sale, 'created_at', None)
-                time_text = dt.strftime('%H:%M:%S') if dt else '-'
+                th_dt = to_thai_dt(getattr(sale, 'created_at', None))
+                time_text = th_dt.strftime('%H:%M:%S') if th_dt else '-'
                 detail_lines.append(f"{sale.doc_number or sale.local_sale_id}: {time_text} | ฿ {float(sale.total_amount or 0):,.2f}")
             detail.setText("\n".join(detail_lines))
         shift_list.itemClicked.connect(show_shift_detail)
