@@ -243,7 +243,8 @@ def main():
         is_offline_login = getattr(token_dlg, 'is_offline_login', False)
         window = MainWindow(db_path=db_path, is_offline_login=is_offline_login)
         window.show()
-        if config.get('device_id') or config.get('pos_token'):
+        # Open customer display only if explicitly configured (default is disabled on startup)
+        if config.get('auto_open_customer_display', False) and (config.get('device_id') or config.get('pos_token')):
             def open_customer_display_fullscreen():
                 try:
                     window.toggle_customer_display()

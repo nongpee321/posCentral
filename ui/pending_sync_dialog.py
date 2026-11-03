@@ -575,19 +575,7 @@ class PendingSyncDialog(QDialog):
 
                 
 
-                err_text = ""
-
-                if r[6]:
-
-                    try:
-
-                        err_obj = json.loads(r[6])
-
-                        err_text = err_obj.get('message', r[6]) if isinstance(err_obj, dict) else str(r[6])
-
-                    except Exception:
-
-                        err_text = str(r[6])
+                err_text = translate_sync_error(r[6]) if r[6] else ""
 
 
 

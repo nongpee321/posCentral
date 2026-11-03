@@ -2545,6 +2545,11 @@ class MainWindow(QMainWindow):
 
                         shift_payload['status'] = 'closed'
 
+                        act_stats = self._get_shift_activity_stats(shift_payload)
+                        for act_k, act_v in act_stats.items():
+                            if not shift_payload.get(act_k):
+                                shift_payload[act_k] = act_v
+
                         ShiftReportDialog(self, shift_payload).exec()
 
                     else:
@@ -3143,6 +3148,12 @@ class MainWindow(QMainWindow):
             pass
 
 
+
+        # Populate activity counts if 0 or missing
+        act_stats = self._get_shift_activity_stats(shift_data)
+        for act_k, act_v in act_stats.items():
+            if not shift_data.get(act_k):
+                shift_data[act_k] = act_v
 
         from ui.receipt_dialog import ShiftReportDialog
 
@@ -3914,6 +3925,109 @@ class MainWindow(QMainWindow):
 
 
 
+    def _get_active_shift_keys(self):
+        shift = getattr(self, 'current_shift', None) or {}
+        keys = []
+        for k in ('id', 'server_id', 'local_id'):
+            v = shift.get(k)
+            if v is not None:
+                keys.append(str(v))
+        return list(dict.fromkeys(keys))
+
+    def _record_shift_activity(self, activity_type):
+        try:
+            keys = self._get_active_shift_keys()
+            shift_key = keys[0] if keys else 'global'
+            activity_file = os.path.join(self.app_data_dir, 'shift_activity.json')
+            data = {}
+            if os.path.exists(activity_file):
+                try:
+                    with open(activity_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                except Exception:
+                    data = {}
+            if shift_key not in data or not isinstance(data[shift_key], dict):
+                data[shift_key] = {'held_count': 0, 'resumed_count': 0, 'voided_count': 0, 'edited_count': 0}
+            entry = data[shift_key]
+            field_map = {
+                'held': 'held_count',
+                'resumed': 'resumed_count',
+                'voided': 'voided_count',
+                'edited': 'edited_count'
+            }
+            target_field = field_map.get(activity_type)
+            if target_field:
+                entry[target_field] = int(entry.get(target_field, 0)) + 1
+            with open(activity_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[POS] Error recording shift activity: {e}")
+
+    def _get_shift_activity_stats(self, shift_data=None):
+        shift = shift_data or getattr(self, 'current_shift', None) or {}
+        candidate_keys = []
+        for k in ('id', 'server_id', 'local_id'):
+            v = shift.get(k)
+            if v is not None:
+                candidate_keys.append(str(v))
+        activity_file = os.path.join(self.app_data_dir, 'shift_activity.json')
+        activity_data = {}
+        if os.path.exists(activity_file):
+            try:
+                with open(activity_file, 'r', encoding='utf-8') as f:
+                    activity_data = json.load(f)
+            except Exception:
+                activity_data = {}
+        held_count = 0
+        resumed_count = 0
+        file_voided = 0
+        file_edited = 0
+        for ck in candidate_keys:
+            if ck in activity_data:
+                e = activity_data[ck]
+                held_count = max(held_count, int(e.get('held_count', 0)))
+                resumed_count = max(resumed_count, int(e.get('resumed_count', 0)))
+                file_voided = max(file_voided, int(e.get('voided_count', 0)))
+                file_edited = max(file_edited, int(e.get('edited_count', 0)))
+        db_voided = 0
+        db_edited = 0
+        try:
+            from database.models import Sale, CancelledBill, Outbox
+            session = init_db(f"sqlite:///{self.db_path}")
+            numeric_ids = []
+            for ck in candidate_keys:
+                try:
+                    numeric_ids.append(int(ck))
+                except Exception:
+                    pass
+            if numeric_ids:
+                cancelled_sales = session.query(Sale).filter(
+                    Sale.shift_id.in_(numeric_ids),
+                    Sale.status == 'cancelled'
+                ).all()
+                db_voided += len(cancelled_sales)
+                for s in cancelled_sales:
+                    ob = session.query(Outbox).filter_by(aggregate_id=s.local_sale_id).first()
+                    reason_txt = (ob.last_error if ob and ob.last_error else '') or (s.sync_error or '')
+                    if 'แก้ไข' in reason_txt:
+                        db_edited += 1
+                cancelled_bills = session.query(CancelledBill).filter(
+                    CancelledBill.shift_id.in_(numeric_ids)
+                ).all()
+                db_voided += len(cancelled_bills)
+                for cb in cancelled_bills:
+                    if cb.reason and 'แก้ไข' in cb.reason:
+                        db_edited += 1
+            session.close()
+        except Exception as e:
+            print(f"[POS] Error reading DB shift stats: {e}")
+        return {
+            'held_bill_count': held_count,
+            'resumed_bill_count': resumed_count,
+            'voided_bill_count': max(file_voided, db_voided),
+            'edited_bill_count': max(file_edited, db_edited)
+        }
+
     def _resolve_discount_approver_id(self):
         active_shift = getattr(self, 'current_shift', None) or {}
         return (
@@ -4169,6 +4283,8 @@ class MainWindow(QMainWindow):
 
         self.update_cart_total()
 
+        self._record_shift_activity('held')
+
         QMessageBox.information(self, "พักบิลสำเร็จ", f"รหัสพักบิล: {hold_code}\nแจ้งรหัสนี้ให้ลูกค้าเพื่อใช้เรียกบิลกลับ\n\nสามารถเปิดการขายให้ลูกค้ารายต่อไปได้ทันที")
 
 
@@ -4241,6 +4357,7 @@ class MainWindow(QMainWindow):
             self.discount_approved_by = self._resolve_discount_approver_id() if disc > 0 else None
 
             self.update_cart_total()
+            self._record_shift_activity('edited')
             doc_no = sale.get('doc_number') if isinstance(sale, dict) else getattr(sale, 'doc_number', '')
             parent_widget = self if isinstance(self, QWidget) else None
             QMessageBox.information(
@@ -4556,6 +4673,8 @@ class MainWindow(QMainWindow):
 
                     
 
+            self._record_shift_activity('resumed')
+
             QMessageBox.information(self, "สำเร็จ", f"ดึงบิล '{chosen.get('label', '')}' กลับมายังตะกร้าเรียบร้อยแล้ว")
 
 
@@ -4652,9 +4771,15 @@ class MainWindow(QMainWindow):
 
             
 
+            active_cur_shift = getattr(self, 'current_shift', None) or {}
+            resolved_cancel_shift_id = (
+                active_cur_shift.get('server_id')
+                or active_cur_shift.get('id')
+                or active_cur_shift.get('local_id')
+            )
             cancel_record = CancelledBill(
 
-                shift_id=self.current_shift.get('id') if self.current_shift else None,
+                shift_id=resolved_cancel_shift_id,
 
                 reason=reason.strip(),
 
@@ -4675,6 +4800,8 @@ class MainWindow(QMainWindow):
             self.cart_table.setRowCount(0)
 
             self.update_cart_total()
+
+            self._record_shift_activity('voided')
 
             
 

@@ -302,7 +302,7 @@ def print_escpos_receipt(printer_name, receipt_data, config):
         cmds += enc("-" * 48) + LINE_FEED
         
     cmds += enc(f"สาขา: {branch}    แคชเชียร์: {cashier}") + LINE_FEED
-    cmds += enc(f"เลขที่: {receipt_no}") + LINE_FEED
+    cmds += enc(f"เลขที่บิล: {receipt_no}") + LINE_FEED
     cmds += ALIGN_RIGHT
     cmds += enc(f"วันที่: {date_str}") + LINE_FEED
     cmds += ALIGN_LEFT
@@ -1014,7 +1014,7 @@ class ReceiptDialog(QDialog):
                             <td colspan="4">Cashier : &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; {safe(cashier)}</td>
                         </tr>
                         <tr>
-                            <td colspan="4" style="font-size: {font_meta}; padding-top: 2px; white-space: nowrap;">{safe(receipt_no)} &nbsp; {safe(_receipt_date_label(date_str))}</td>
+                            <td colspan="4" style="font-size: {font_meta}; padding-top: 2px; white-space: nowrap;">เลขที่บิล: {safe(receipt_no)} &nbsp; {safe(_receipt_date_label(date_str))}</td>
                         </tr>
                     </tbody>
                 </table>

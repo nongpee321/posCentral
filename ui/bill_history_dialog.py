@@ -656,6 +656,12 @@ class BillHistoryDialog(QDialog):
         # 3. ดำเนินการยกเลิก (Void)
         success = self._execute_void(sale, reason)
         if success:
+            parent_w = self.parent()
+            if parent_w and hasattr(parent_w, '_record_shift_activity'):
+                try:
+                    parent_w._record_shift_activity('voided')
+                except Exception:
+                    pass
             QMessageBox.information(self, "สำเร็จ", f"ยกเลิกบิล {sale['doc_number']} เรียบร้อยแล้ว")
             self.load_sales()
 
@@ -712,6 +718,14 @@ class BillHistoryDialog(QDialog):
         success = self._execute_void(sale, reason)
         if not success:
             return
+
+        # บันทึกกิจกรรมแก้ไขบิล
+        parent_w = self.parent()
+        if parent_w and hasattr(parent_w, '_record_shift_activity'):
+            try:
+                parent_w._record_shift_activity('edited')
+            except Exception:
+                pass
 
         # ส่งรายการกลับเข้าตะกร้า
         self.edit_bill_requested.emit(sale)
