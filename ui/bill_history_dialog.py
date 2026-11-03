@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QColor
 
-from database.models import init_db, Sale, SaleItem, Payment, Outbox
+from database.models import init_db, Sale, SaleItem, Payment, Outbox, PosShift
 from ui.receipt_dialog import ReceiptDialog
 
 logger = logging.getLogger("BillHistoryDialog")
@@ -103,10 +103,17 @@ class BillHistoryDialog(QDialog):
         self.filter_combo.addItem("กะปัจจุบัน", "shift")
         self.filter_combo.addItem("วันนี้ทั้งหมด", "today")
         self.filter_combo.addItem("ทั้งหมด (All)", "all")
+        self.filter_combo.setMinimumWidth(160)
         self.filter_combo.setStyleSheet("""
             QComboBox {
                 background: white; border: 1px solid #cbd5e1; border-radius: 6px;
-                padding: 6px 12px; font-size: 13px; font-weight: bold; color: #1e293b;
+                padding: 6px 28px 6px 12px; font-size: 13px; font-weight: bold; color: #1e293b;
+            }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 24px;
+                border-left: 1px solid #cbd5e1;
             }
         """)
         self.filter_combo.currentIndexChanged.connect(self.load_sales)
@@ -297,9 +304,32 @@ class BillHistoryDialog(QDialog):
 
             filter_mode = self.filter_combo.currentData()
             if filter_mode == 'shift':
-                shift_id = self.current_shift.get('local_id') or self.current_shift.get('id')
-                if shift_id:
-                    query = query.filter(Sale.shift_id == shift_id)
+                # Match both server_id and local_id so bills always appear regardless of ID format
+                shift_ids = set()
+                if isinstance(self.current_shift, dict):
+                    for k in ('id', 'server_id', 'local_id', 'shift_id'):
+                        v = self.current_shift.get(k)
+                        if v is not None:
+                            try:
+                                shift_ids.add(int(v))
+                            except (ValueError, TypeError):
+                                pass
+                            shift_ids.add(str(v))
+
+                # If no shift_ids provided or current_shift is inactive, resolve most recent shift
+                if not shift_ids:
+                    latest_shift = session.query(PosShift).order_by(PosShift.id.desc()).first()
+                    if latest_shift:
+                        if latest_shift.id:
+                            shift_ids.add(latest_shift.id)
+                            shift_ids.add(str(latest_shift.id))
+                        if latest_shift.server_id:
+                            shift_ids.add(latest_shift.server_id)
+                            shift_ids.add(str(latest_shift.server_id))
+
+                if shift_ids:
+                    query = query.filter(Sale.shift_id.in_(list(shift_ids)))
+
             elif filter_mode == 'today':
                 today_start = datetime.now(timezone(timedelta(hours=7))).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).replace(tzinfo=None)
                 query = query.filter(Sale.created_at >= today_start)
@@ -340,7 +370,10 @@ class BillHistoryDialog(QDialog):
 
             session.close()
             self.display_sales(self.all_sales)
-            self.status_bar_lbl.setText(f"พบทั้งหมด {len(self.all_sales)} บิล")
+            if self.all_sales:
+                self.status_bar_lbl.setText(f"พบทั้งหมด {len(self.all_sales)} บิล")
+            else:
+                self.status_bar_lbl.setText("ไม่พบบิลในเงื่อนไขนี้ (เลือก 'วันนี้ทั้งหมด' หรือ 'ทั้งหมด' เพื่อดูบิลอื่น)")
         except Exception as e:
             logger.exception("Error loading sales from SQLite")
             QMessageBox.critical(self, "ข้อผิดพลาด", f"ไม่สามารถโหลดประวัติบิลได้:\n{str(e)}")
