@@ -13,16 +13,16 @@ def qapp():
 def test_customer_display_fullscreen_toggle(qapp):
     win = CustomerDisplayWindow()
     assert hasattr(win, 'fullscreen_btn')
-    assert "เต็มจอ" in win.fullscreen_btn.text()
+    assert win.fullscreen_btn.text() == "⛶"
     
     # Toggle to full screen
     win.toggle_fullscreen()
     assert win.isFullScreen() is True
-    assert "ย่อจอ" in win.fullscreen_btn.text()
+    assert win.fullscreen_btn.text() == "🗗"
     
     # Toggle back to normal
     win.toggle_fullscreen()
     assert win.isFullScreen() is False
-    assert "เต็มจอ" in win.fullscreen_btn.text()
+    assert win.fullscreen_btn.text() == "⛶"
     
     win.close()

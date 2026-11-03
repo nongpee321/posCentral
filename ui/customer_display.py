@@ -77,17 +77,17 @@ class CustomerDisplayWindow(QMainWindow):
         
         header_layout.addStretch()
         
-        self.fullscreen_btn = QPushButton("เต็มจอ (Fullscreen)")
+        self.fullscreen_btn = QPushButton("⛶")
+        self.fullscreen_btn.setToolTip("เต็มจอ (Fullscreen) / ย่อจอ (F11)")
         self.fullscreen_btn.setCursor(Qt.PointingHandCursor)
-        self.fullscreen_btn.setFixedHeight(34)
+        self.fullscreen_btn.setFixedSize(34, 34)
         self.fullscreen_btn.setStyleSheet("""
             QPushButton {
                 background-color: #047857;
                 color: white;
                 border: none;
                 border-radius: 17px;
-                padding: 6px 18px;
-                font-size: 13px;
+                font-size: 16px;
                 font-weight: bold;
             }
             QPushButton:hover {
@@ -194,22 +194,6 @@ class CustomerDisplayWindow(QMainWindow):
         subtotal_layout = QHBoxLayout(subtotal_frame)
         subtotal_layout.setContentsMargins(8, 4, 8, 4)
         
-        sub1 = QVBoxLayout()
-        lbl_s1 = QLabel("ราคาก่อนภาษี")
-        lbl_s1.setStyleSheet("color: #475569; font-size: 11px; font-weight: bold;")
-        self.subtotal_lbl = QLabel("0.00 ฿")
-        self.subtotal_lbl.setStyleSheet("color: #1e293b; font-size: 13px; font-weight: bold;")
-        sub1.addWidget(lbl_s1)
-        sub1.addWidget(self.subtotal_lbl)
-        
-        sub2 = QVBoxLayout()
-        lbl_s2 = QLabel("VAT 7%")
-        lbl_s2.setStyleSheet("color: #475569; font-size: 11px; font-weight: bold;")
-        self.vat_lbl = QLabel("0.00 ฿")
-        self.vat_lbl.setStyleSheet("color: #1e293b; font-size: 13px; font-weight: bold;")
-        sub2.addWidget(lbl_s2)
-        sub2.addWidget(self.vat_lbl)
-        
         sub3 = QVBoxLayout()
         lbl_s3 = QLabel("ส่วนลด")
         lbl_s3.setStyleSheet("color: #059669; font-size: 11px; font-weight: bold;")
@@ -218,9 +202,12 @@ class CustomerDisplayWindow(QMainWindow):
         sub3.addWidget(lbl_s3)
         sub3.addWidget(self.disc_lbl)
         
-        subtotal_layout.addLayout(sub1)
-        subtotal_layout.addLayout(sub2)
         subtotal_layout.addLayout(sub3)
+        
+        self.subtotal_lbl = QLabel("0.00 ฿")
+        self.subtotal_lbl.hide()
+        self.vat_lbl = QLabel("0.00 ฿")
+        self.vat_lbl.hide()
         
         total_layout.addWidget(subtotal_frame)
         right_panel.addWidget(total_box)
@@ -336,12 +323,12 @@ class CustomerDisplayWindow(QMainWindow):
         self.total_lbl.setStyleSheet("font-size: 42px; font-weight: 900; color: #dc2626; border: none; font-family: Arial;")
         self.disc_lbl.setText(f"{disc_val:,.2f} ฿")
         
-        if total_val > 0:
+        if total_val > 0 and hasattr(self, 'subtotal_lbl'):
             sub = total_val / 1.07
             vat = total_val - sub
             self.subtotal_lbl.setText(f"{sub:,.2f} ฿")
             self.vat_lbl.setText(f"{vat:,.2f} ฿")
-        else:
+        elif hasattr(self, 'subtotal_lbl'):
             self.subtotal_lbl.setText("0.00 ฿")
             self.vat_lbl.setText("0.00 ฿")
         
@@ -399,12 +386,12 @@ class CustomerDisplayWindow(QMainWindow):
         if discount is not None:
             self.disc_lbl.setText(f"{float(discount):,.2f} ฿")
 
-        if amt > 0:
+        if amt > 0 and hasattr(self, 'subtotal_lbl'):
             sub = amt / 1.07
             vat = amt - sub
             self.subtotal_lbl.setText(f"{sub:,.2f} ฿")
             self.vat_lbl.setText(f"{vat:,.2f} ฿")
-        else:
+        elif hasattr(self, 'subtotal_lbl'):
             self.subtotal_lbl.setText("0.00 ฿")
             self.vat_lbl.setText("0.00 ฿")
 
@@ -428,21 +415,23 @@ class CustomerDisplayWindow(QMainWindow):
         self.total_lbl.setStyleSheet("font-size: 42px; font-weight: 900; color: #10b981; border: none; font-family: Arial;")
         self.total_lbl.setText(f"{change:,.2f}")
         self.disc_lbl.setText("0.00 ฿")
-        self.subtotal_lbl.setText("0.00 ฿")
-        self.vat_lbl.setText("0.00 ฿")
+        if hasattr(self, 'subtotal_lbl'):
+            self.subtotal_lbl.setText("0.00 ฿")
+        if hasattr(self, 'vat_lbl'):
+            self.vat_lbl.setText("0.00 ฿")
 
     def toggle_fullscreen(self):
         if self.isFullScreen():
             self.showNormal()
-            self.fullscreen_btn.setText("เต็มจอ (Fullscreen)")
+            self.fullscreen_btn.setText("⛶")
+            self.fullscreen_btn.setToolTip("เต็มจอ (Fullscreen)")
             self.fullscreen_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #047857;
                     color: white;
                     border: none;
                     border-radius: 17px;
-                    padding: 6px 18px;
-                    font-size: 13px;
+                    font-size: 16px;
                     font-weight: bold;
                 }
                 QPushButton:hover {
@@ -451,15 +440,15 @@ class CustomerDisplayWindow(QMainWindow):
             """)
         else:
             self.showFullScreen()
-            self.fullscreen_btn.setText("ย่อจอ (Exit Fullscreen)")
+            self.fullscreen_btn.setText("🗗")
+            self.fullscreen_btn.setToolTip("ย่อจอ (Exit Fullscreen)")
             self.fullscreen_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #475569;
                     color: white;
                     border: none;
                     border-radius: 17px;
-                    padding: 6px 18px;
-                    font-size: 13px;
+                    font-size: 16px;
                     font-weight: bold;
                 }
                 QPushButton:hover {
