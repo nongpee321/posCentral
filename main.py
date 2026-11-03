@@ -16,7 +16,7 @@ def main():
         from ui.main_window import MainWindow
         from ui.token_dialog import PosTokenLoginDialog
         from database.models import init_db, Product, Category
-        from PySide6.QtCore import QLocale
+        from PySide6.QtCore import QLocale, QTimer
 
         # 1. Initialize SQLite Database (%LOCALAPPDATA%\PopCentralPOS\data\pos.db)
         from database.models import get_pos_data_paths, backup_pos_db
@@ -29,6 +29,7 @@ def main():
 
         # Pre-seed bundled pos.db if pos.db in AppData is empty
         prod_count = session.query(Product).count()
+        session.close()
         if prod_count == 0:
             bundled_candidates = []
             if getattr(sys, 'frozen', False):
@@ -242,6 +243,18 @@ def main():
         is_offline_login = getattr(token_dlg, 'is_offline_login', False)
         window = MainWindow(db_path=db_path, is_offline_login=is_offline_login)
         window.show()
+        if config.get('device_id') or config.get('pos_token'):
+            def open_customer_display_fullscreen():
+                try:
+                    window.toggle_customer_display()
+                    if window.customer_display:
+                        if not window.customer_display.isFullScreen():
+                            window.customer_display.toggle_fullscreen()
+                except Exception as exc:
+                    print(f"[POS] Customer display auto-open skipped: {exc}")
+            QTimer.singleShot(800, open_customer_display_fullscreen)
+        # Back up after the UI is visible so startup/login is not blocked by SQLite I/O.
+        QTimer.singleShot(1500, lambda: backup_pos_db(db_path, comment="daily_startup"))
         sys.exit(app.exec())
     except Exception as e:
         error_msg = traceback.format_exc()

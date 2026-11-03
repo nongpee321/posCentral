@@ -1252,6 +1252,10 @@ class ShiftReportDialog(QDialog):
         counted_cash = shift.get('counted_cash')
         cash_difference = shift.get('cash_difference')
         receipt_count = int(shift.get('receipt_count') or 0)
+        held_bill_count = int(shift.get('held_bill_count') or 0)
+        resumed_bill_count = int(shift.get('resumed_bill_count') or 0)
+        voided_bill_count = int(shift.get('voided_bill_count') or 0)
+        edited_bill_count = int(shift.get('edited_bill_count') or 0)
 
         # VAT calculation (approx 7% included)
         vat_amount = round(total_sales * 7 / 107, 2)
@@ -1273,18 +1277,18 @@ class ShiftReportDialog(QDialog):
         <head>
         <meta charset="utf-8">
         <style>
-            body {{ font-family: 'Tahoma', 'Arial', sans-serif; font-size: 13px; font-weight: 700; color: #000000; margin: 0; padding: 4px; line-height: 1.3; }}
+            body {{ font-family: 'Tahoma', 'Arial', sans-serif; font-size: 15px; font-weight: 700; color: #000000; margin: 0; padding: 4px; line-height: 1.32; }}
             .center {{ text-align: center; }}
             .bold {{ font-weight: 800; }}
-            .title {{ font-size: 17px; font-weight: 900; margin-bottom: 3px; color: #000; }}
-            .subtitle {{ font-size: 14.5px; font-weight: 900; margin-bottom: 5px; color: #000; }}
+            .title {{ font-size: 20px; font-weight: 900; margin-bottom: 4px; color: #000; }}
+            .subtitle {{ font-size: 17px; font-weight: 900; margin-bottom: 6px; color: #000; }}
             .rule {{ border-top: 2px dashed #000; margin: 6px 0; }}
             .rule-solid {{ border-top: 2px solid #000; margin: 6px 0; }}
             .rule-double {{ border-top: 3px double #000; margin: 6px 0; }}
-            table {{ width: 100%; border-collapse: collapse; font-size: 13px; font-weight: 700; color: #000; }}
+            table {{ width: 100%; border-collapse: collapse; font-size: 15px; font-weight: 700; color: #000; }}
             td {{ vertical-align: top; color: #000; }}
             .num {{ text-align: right; font-variant-numeric: tabular-nums; font-weight: 800; }}
-            .section {{ font-weight: 900; font-size: 14px; margin-top: 8px; margin-bottom: 4px; text-decoration: underline; color: #000; }}
+            .section {{ font-weight: 900; font-size: 16px; margin-top: 9px; margin-bottom: 5px; text-decoration: underline; color: #000; }}
         </style>
         </head>
         <body>
@@ -1307,6 +1311,15 @@ class ShiftReportDialog(QDialog):
                 <tr><td style="padding: 2px 0;">ยอดขายก่อน VAT</td><td align="right" style="font-weight: 800;">{before_vat:,.2f}</td></tr>
                 <tr><td style="padding: 2px 0;">ภาษีมูลค่าเพิ่ม (7%)</td><td align="right" style="font-weight: 800;">{vat_amount:,.2f}</td></tr>
                 <tr style="font-weight: 900; font-size: 15px;"><td style="padding: 5px 0;">ยอดขายรวมสุทธิ</td><td align="right" style="padding: 5px 0;">{total_sales:,.2f}</td></tr>
+            </table>
+            <div class="rule"></div>
+            <div class="section">สรุปกิจกรรมภายในกะ</div>
+            <table>
+                <tr><td style="padding: 2px 0;">บิลขายสำเร็จ</td><td align="right" style="font-weight: 800;">{receipt_count} บิล</td></tr>
+                <tr><td style="padding: 2px 0;">บิลพักทั้งหมด</td><td align="right" style="font-weight: 800;">{held_bill_count} บิล</td></tr>
+                <tr><td style="padding: 2px 0;">บิลพักที่เรียกกลับมาขายต่อ</td><td align="right" style="font-weight: 800;">{resumed_bill_count} บิล</td></tr>
+                <tr><td style="padding: 2px 0;">บิลยกเลิก</td><td align="right" style="font-weight: 800;">{voided_bill_count} บิล</td></tr>
+                <tr><td style="padding: 2px 0;">บิลที่แก้ไข</td><td align="right" style="font-weight: 800;">{edited_bill_count} บิล</td></tr>
             </table>
             <div class="rule"></div>
             <div class="section">แยกตามช่องทางชำระ</div>

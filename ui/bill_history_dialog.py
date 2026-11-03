@@ -2,7 +2,7 @@
 import json
 import logging
 import requests
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
 from PySide6.QtWidgets import (
@@ -17,6 +17,20 @@ from database.models import init_db, Sale, SaleItem, Payment, Outbox
 from ui.receipt_dialog import ReceiptDialog
 
 logger = logging.getLogger("BillHistoryDialog")
+
+
+def local_sale_datetime(value):
+    """SQLite stores POS timestamps as UTC; display them in Thailand time."""
+    if not value:
+        return None
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        except ValueError:
+            return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone(timedelta(hours=7)))
 
 
 class BillHistoryDialog(QDialog):
@@ -103,7 +117,7 @@ class BillHistoryDialog(QDialog):
         self.search_input.setFixedWidth(280)
         self.search_input.setStyleSheet("""
             QLineEdit {
-                background: white; border: 1px solid #cbd5e1; border-radius: 6px;
+                background: white; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 6px;
                 padding: 6px 10px; font-size: 13px;
             }
         """)
@@ -132,18 +146,21 @@ class BillHistoryDialog(QDialog):
         top_layout.setContentsMargins(0, 0, 0, 0)
 
         self.sales_table = QTableWidget()
-        self.sales_table.setColumnCount(8)
+        self.sales_table.setStyleSheet("""
+            QTableWidget { background: #ffffff; color: #0f172a; gridline-color: #cbd5e1; }
+            QTableWidget::item { color: #0f172a; padding: 5px; }
+            QTableWidget::item:selected { background: #dbeafe; color: #0f172a; }
+            QHeaderView::section { background: #e2e8f0; color: #0f172a; font-weight: bold; padding: 6px; }
+        """)
+        self.sales_table.setColumnCount(9)
         self.sales_table.setHorizontalHeaderLabels([
-            "เลขที่ใบเสร็จ", "เวลาขาย", "จำนวนรายการ", "ยอดก่อนลด", "ส่วนลด", "ยอดสุทธิ", "วิธีชำระ", "สถานะ"
+            "เลขที่ใบเสร็จ", "วันที่ขาย", "เวลาขาย", "จำนวนรายการ", "ยอดก่อนลด", "ส่วนลด", "ยอดสุทธิ", "วิธีชำระ", "สถานะ"
         ])
         self.sales_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.sales_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.sales_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.sales_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.sales_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self.sales_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        self.sales_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-        self.sales_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
+        for column in range(2, 8):
+            self.sales_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        self.sales_table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Stretch)
         self.sales_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.sales_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.sales_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -169,6 +186,12 @@ class BillHistoryDialog(QDialog):
         items_layout.addWidget(items_title)
 
         self.items_table = QTableWidget()
+        self.items_table.setStyleSheet("""
+            QTableWidget { background: #ffffff; color: #0f172a; gridline-color: #cbd5e1; }
+            QTableWidget::item { color: #0f172a; padding: 5px; }
+            QTableWidget::item:selected { background: #dbeafe; color: #0f172a; }
+            QHeaderView::section { background: #e2e8f0; color: #0f172a; font-weight: bold; padding: 6px; }
+        """)
         self.items_table.setColumnCount(4)
         self.items_table.setHorizontalHeaderLabels(["ชื่อสินค้า", "จำนวน", "ราคา/หน่วย", "รวม"])
         self.items_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -232,6 +255,12 @@ class BillHistoryDialog(QDialog):
         self.void_btn.clicked.connect(self.void_bill)
         action_layout.addWidget(self.void_btn)
 
+        self.return_btn = QPushButton("คืนสินค้า / คืนเงิน (Return)")
+        self.return_btn.setEnabled(False)
+        self.return_btn.setStyleSheet("QPushButton { background-color: #7c3aed; color: white; border-radius: 6px; padding: 10px; font-weight: bold; font-size: 13px; } QPushButton:hover { background-color: #6d28d9; } QPushButton:disabled { background-color: #94a3b8; color: #e2e8f0; }")
+        self.return_btn.clicked.connect(self.return_bill)
+        action_layout.addWidget(self.return_btn)
+
         bottom_layout.addWidget(action_frame, 2)
 
         splitter.addWidget(bottom_widget)
@@ -272,7 +301,7 @@ class BillHistoryDialog(QDialog):
                 if shift_id:
                     query = query.filter(Sale.shift_id == shift_id)
             elif filter_mode == 'today':
-                today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                today_start = datetime.now(timezone(timedelta(hours=7))).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).replace(tzinfo=None)
                 query = query.filter(Sale.created_at >= today_start)
 
             sales = query.limit(100).all()
@@ -292,7 +321,7 @@ class BillHistoryDialog(QDialog):
                     'local_sale_id': s.local_sale_id,
                     'server_receipt_id': s.server_receipt_id,
                     'doc_number': s.doc_number or s.local_sale_id,
-                    'created_at': s.created_at.strftime("%Y-%m-%d %H:%M:%S") if s.created_at else "-",
+                    'created_at': local_sale_datetime(s.created_at).strftime("%Y-%m-%d %H:%M:%S") if local_sale_datetime(s.created_at) else "-",
                     'total_amount': float(s.total_amount or 0.0),
                     'received_amount': float(s.received_amount or 0.0),
                     'discount_amount': float(getattr(s, 'discount_amount', 0.0) or 0.0),
@@ -326,7 +355,12 @@ class BillHistoryDialog(QDialog):
             doc_item.setData(Qt.UserRole, s)
             doc_item.setFont(QFont("Tahoma", 10, QFont.Bold))
 
-            time_item = QTableWidgetItem(s['created_at'])
+            created_at = str(s.get('created_at') or '-')
+            date_text, time_text = (created_at.split(' ', 1) + ['-'])[:2] if ' ' in created_at else (created_at, '-')
+            date_item = QTableWidgetItem(date_text)
+            date_item.setTextAlignment(Qt.AlignCenter)
+            time_item = QTableWidgetItem(time_text)
+            time_item.setTextAlignment(Qt.AlignCenter)
             items_count_item = QTableWidgetItem(f"{len(s['items'])} รายการ")
             items_count_item.setTextAlignment(Qt.AlignCenter)
 
@@ -373,13 +407,14 @@ class BillHistoryDialog(QDialog):
                 st_item.setForeground(QColor("#d97706"))
 
             self.sales_table.setItem(row, 0, doc_item)
-            self.sales_table.setItem(row, 1, time_item)
-            self.sales_table.setItem(row, 2, items_count_item)
-            self.sales_table.setItem(row, 3, sub_item)
-            self.sales_table.setItem(row, 4, disc_item)
-            self.sales_table.setItem(row, 5, net_item)
-            self.sales_table.setItem(row, 6, pm_item)
-            self.sales_table.setItem(row, 7, st_item)
+            self.sales_table.setItem(row, 1, date_item)
+            self.sales_table.setItem(row, 2, time_item)
+            self.sales_table.setItem(row, 3, items_count_item)
+            self.sales_table.setItem(row, 4, sub_item)
+            self.sales_table.setItem(row, 5, disc_item)
+            self.sales_table.setItem(row, 6, net_item)
+            self.sales_table.setItem(row, 7, pm_item)
+            self.sales_table.setItem(row, 8, st_item)
 
         self.reprint_btn.setEnabled(False)
         self.edit_btn.setEnabled(False)
@@ -468,6 +503,7 @@ class BillHistoryDialog(QDialog):
         self.edit_btn.setEnabled(True)
         # Void bill is only available if not already cancelled
         self.void_btn.setEnabled(sale['status'] != 'cancelled')
+        self.return_btn.setEnabled(sale['status'] == 'synced')
 
     def reprint_bill(self):
         """พิมพ์ใบเสร็จซ้ำ (Reprint)"""
@@ -509,6 +545,45 @@ class BillHistoryDialog(QDialog):
 
         dlg = ReceiptDialog(self, receipt_data=receipt_data)
         dlg.exec()
+
+    def return_bill(self):
+        """คืนสินค้าทั้งบิล พร้อมเลือกคืนเงินสดหรือโอน/QR"""
+        sale = self.selected_sale
+        if not sale or sale.get('status') != 'synced':
+            return
+        method, ok = QInputDialog.getItem(self, "วิธีคืนเงิน", "เลือกวิธีคืนเงิน:", ["เงินสด", "โอน/QR"], 0, False)
+        if not ok:
+            return
+        reason, ok = QInputDialog.getText(self, "เหตุผลการคืนสินค้า", "ระบุเหตุผล:", QLineEdit.EchoMode.Normal, "ลูกค้าขอคืนสินค้า")
+        if not ok or not reason.strip():
+            return
+        items = [
+            {'product_id': int(item.get('product_id') or item.get('id')), 'qty': float(item.get('qty') or 0)}
+            for item in sale.get('items', []) if (item.get('product_id') or item.get('id')) and float(item.get('qty') or 0) > 0
+        ]
+        if not items:
+            QMessageBox.warning(self, "คืนสินค้า", "ไม่พบรายการสินค้าในบิลนี้")
+            return
+        api_url = (self.config.get('api_url') or '').rstrip('/')
+        token = self.config.get('pos_token') or ''
+        try:
+            resp = requests.post(
+                f"{api_url}/api/pos/receipt/return",
+                json={'receipt_no': sale['doc_number'], 'shift_id': sale.get('shift_id'), 'reason': reason.strip(),
+                      'refund_method': 'cash' if method == 'เงินสด' else 'transfer', 'items': items},
+                headers={'Authorization': f'Bearer {token}', 'Accept': 'application/json'}, timeout=15
+            )
+            if resp.status_code in (200, 201):
+                QMessageBox.information(self, "คืนสินค้าสำเร็จ", f"คืนสินค้าและคืนเงินแบบ{method}แล้ว")
+                self.load_sales()
+            else:
+                try:
+                    msg = resp.json().get('message', resp.text)
+                except Exception:
+                    msg = resp.text
+                QMessageBox.warning(self, "คืนสินค้าไม่สำเร็จ", str(msg))
+        except Exception as exc:
+            QMessageBox.warning(self, "เชื่อมต่อ ERP ไม่ได้", str(exc))
 
     def void_bill(self):
         """ยกเลิกบิล (Void) คืนสต๊อกและยอดเงิน"""

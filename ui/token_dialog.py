@@ -430,6 +430,12 @@ class PosTokenLoginDialog(QDialog):
         except Exception:
             pass
 
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            event.ignore()
+            return
+        super().keyPressEvent(event)
+
     def do_verify_and_login(self):
         token = self.token_input.text().strip()
         username = self.user_input.text().strip()
@@ -450,25 +456,47 @@ class PosTokenLoginDialog(QDialog):
             self.pin_input.setFocus()
             return
 
+        if getattr(self, '_is_logging_in', False):
+            return
+        self._is_logging_in = True
+
         self.login_btn.setEnabled(False)
         self.login_btn.setText("กำลังตรวจสอบ...")
         self.status_lbl.setText("กำลังเชื่อมต่อเซิร์ฟเวอร์...")
         self.status_lbl.setStyleSheet("font-size: 12px; font-weight: 700; color: #dc2626;")
         self.repaint()
+        from PySide6.QtWidgets import QApplication
+        QApplication.processEvents()
 
         try:
+            from concurrent.futures import ThreadPoolExecutor
+            import time
+
+            headers = {'Authorization': f"Bearer {token}", 'Accept': 'application/json'}
+            ping_data = None
+            ping_res = None
+            login_res = None
+
+            # Helper to run network request in background while pumping Qt event loop so UI never freezes
+            def _run_with_event_loop(func, *args, **kwargs):
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    fut = executor.submit(func, *args, **kwargs)
+                    while not fut.done():
+                        QApplication.processEvents()
+                        time.sleep(0.015)
+                    return fut.result()
+
             # 1. ตรวจสอบ Token
-            ping_res = requests.get(
+            ping_res = _run_with_event_loop(
+                requests.get,
                 f"{self.api_url}/api/pos/ping",
-                headers={'Authorization': f"Bearer {token}", 'Accept': 'application/json'},
+                headers=headers,
                 timeout=(5, 20)
             )
             if ping_res.status_code != 200:
                 self.status_lbl.setText("Token ไม่ถูกต้อง หรือถูกเพิกถอน")
                 self.status_lbl.setStyleSheet("font-size: 12px; font-weight: 700; color: #dc2626;")
                 QMessageBox.warning(self, "ข้อผิดพลาด", "รหัสเครื่อง (Token) ไม่ถูกต้อง หรือถูกระงับการใช้งาน")
-                self.login_btn.setEnabled(True)
-                self.login_btn.setText("เข้าสู่ระบบ")
                 return
 
             ping_data = ping_res.json()
@@ -480,9 +508,10 @@ class PosTokenLoginDialog(QDialog):
             self.token = token
 
             # 2. ตรวจสอบ Cashier Credentials
-            login_res = requests.post(
+            login_res = _run_with_event_loop(
+                requests.post,
                 f"{self.api_url}/api/pos/cashier/login",
-                headers={'Authorization': f"Bearer {token}", 'Accept': 'application/json'},
+                headers=headers,
                 json={'code': username, 'pin': pin},
                 timeout=(5, 20)
             )
@@ -572,6 +601,7 @@ class PosTokenLoginDialog(QDialog):
             )
 
         finally:
+            self._is_logging_in = False
             self.login_btn.setEnabled(True)
             self.login_btn.setText("เข้าสู่ระบบ")
 

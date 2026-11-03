@@ -979,7 +979,8 @@ class MainWindow(QMainWindow):
 
         else:
 
-            self.add_to_cart(product, qty=1.0)
+            unit_factor = float(product.get('unit_factor') or 1.0) if isinstance(product, dict) else 1.0
+            self.add_to_cart(product, qty=unit_factor if unit_factor > 0 else 1.0)
 
 
 
@@ -1107,36 +1108,55 @@ class MainWindow(QMainWindow):
                     Product.id.in_(matching_pids)
                 )
             ).order_by(Product.name_th).limit(8).all()
+            category_matches = session.query(Category).filter(
+                Category.is_active == True,
+                Category.name_th.like(sq)
+            ).order_by(Category.name_th).limit(6).all()
 
             self.suggestions_list.clear()
             if not matches:
-                self.suggestions_list.hide()
-                return
+                if not category_matches:
+                    self.suggestions_list.hide()
+                    return
 
             from PySide6.QtGui import QFont
+            for cat in category_matches:
+                item = QListWidgetItem(f"หมวดหมู่: {cat.name_th}")
+                item.setFont(QFont("Tahoma", 13, QFont.Bold))
+                item.setData(Qt.UserRole, {'category_id': cat.id, 'category_name': cat.name_th})
+                self.suggestions_list.addItem(item)
             for p in matches:
                 price = float(p.pos_price if p.pos_price is not None and p.pos_price > 0 else (p.default_price or 0.0))
                 is_promo = bool(getattr(p, 'is_promotion', False))
-                promo_tag = " [ลดพิเศษ]" if is_promo else ""
-                code_tag = f" ({p.barcode or p.sku_code})" if (p.barcode or p.sku_code) else ""
-                item_text = f"{p.name_th}{code_tag}  —  ฿{price:,.2f}{promo_tag}"
-
-                list_item = QListWidgetItem(item_text)
-                list_item.setFont(QFont("Tahoma", 13, QFont.Bold))
+                promo_tag = " [\u0e25\u0e14\u0e1e\u0e34\u0e40\u0e28\u0e29]" if is_promo else ""
                 p_dict = {
-                    'id': p.id,
-                    'sku_code': str(p.sku_code),
-                    'name_th': str(p.name_th),
+                    'id': p.id, 'sku_code': str(p.sku_code), 'name_th': str(p.name_th),
                     'default_price': float(p.default_price or 0.0),
                     'pos_price': float(p.pos_price) if p.pos_price is not None else None,
-                    'is_promotion': is_promo,
-                    'is_scale_item': bool(p.is_scale_item),
+                    'is_promotion': is_promo, 'is_scale_item': bool(p.is_scale_item),
                     'stock_qty': float(p.stock_qty) if p.stock_qty is not None else 999999,
                 }
-                list_item.setData(Qt.UserRole, p_dict)
-                self.suggestions_list.addItem(list_item)
+                units = session.query(ProductBarcode).filter(ProductBarcode.product_id == p.id).order_by(ProductBarcode.id).all()
+                unit_rows, seen = [], set()
+                for bc in units:
+                    code = str(bc.barcode or '').strip()
+                    unit = str(bc.unit_name or '').strip() or '\u0e2b\u0e19\u0e48\u0e27\u0e22\u0e2b\u0e25\u0e31\u0e01'
+                    factor = float(bc.unit_factor or 1.0)
+                    key = (code, unit, round(factor, 6))
+                    if code and key not in seen:
+                        seen.add(key)
+                        unit_rows.append((unit, code, factor))
+                if not unit_rows:
+                    unit_rows = [('\u0e2b\u0e19\u0e48\u0e27\u0e22\u0e2b\u0e25\u0e31\u0e01', str(p.barcode or p.sku_code or ''), 1.0)]
+                for unit, code, factor in unit_rows:
+                    item = QListWidgetItem(f"{p.name_th} — {unit} (x{factor:g}) [{code}]  ฿{price:,.2f}{promo_tag}")
+                    item.setFont(QFont("Tahoma", 13, QFont.Bold))
+                    item_dict = dict(p_dict)
+                    item_dict.update({'unit_name': unit, 'unit_factor': factor, 'selected_barcode': code})
+                    item.setData(Qt.UserRole, item_dict)
+                    self.suggestions_list.addItem(item)
 
-            self.suggestions_list.setFixedHeight(min(240, max(46, len(matches) * 38 + 6)))
+            self.suggestions_list.setFixedHeight(min(300, max(46, self.suggestions_list.count() * 38 + 6)))
             self.suggestions_list.show()
         except Exception:
             pass
@@ -1149,12 +1169,16 @@ class MainWindow(QMainWindow):
             return
         p_dict = list_item.data(Qt.UserRole)
         if p_dict:
+            category_id = p_dict.get('category_id') if isinstance(p_dict, dict) else None
             if hasattr(self, 'suggestions_list'):
                 self.suggestions_list.clear()
                 self.suggestions_list.hide()
             self.search_input.blockSignals(True)
             self.search_input.clear()
             self.search_input.blockSignals(False)
+            if category_id is not None:
+                self.on_category_selected(category_id)
+                return
             self.handle_product_click(p_dict)
             self.render_products_grid(cat_id=getattr(self, 'selected_category_id', None))
 
@@ -1591,12 +1615,6 @@ class MainWindow(QMainWindow):
 
                     )
 
-                    if current_cart_qty + qty > stock_qty:
-
-                        QMessageBox.warning(self, "แจ้งเตือน", f"สต็อกไม่พอ (เหลือ {stock_qty:g} ชิ้น)")
-
-                        return
-
 
 
                     new_qty = current_cart_qty + qty
@@ -1613,18 +1631,6 @@ class MainWindow(QMainWindow):
 
                     return
 
-            
-
-            if stock_qty <= 0:
-
-                QMessageBox.warning(self, "แจ้งเตือน", f"สินค้าหมดสต็อก (เหลือ {stock_qty:g} ชิ้น)")
-
-                return
-
-            if stock_qty < 20:
-
-                QMessageBox.warning(self, "แจ้งเตือน", f"สินค้าเหลือน้อย (เหลือ {stock_qty:g} ชิ้น)")
-
                 
 
             row = self.cart_table.rowCount()
@@ -1634,6 +1640,10 @@ class MainWindow(QMainWindow):
             
 
             name_str = str(prod_name) if prod_name else ""
+
+            selected_unit = product.get('unit_name') if isinstance(product, dict) else None
+            if selected_unit and not is_scale:
+                name_str = f"{name_str} [{selected_unit}]"
 
             if is_scale:
 
@@ -1772,12 +1782,6 @@ class MainWindow(QMainWindow):
             
 
             if ok:
-
-                if new_qty > stock_qty:
-
-                    QMessageBox.warning(self, "แจ้งเตือน", f"สต็อกไม่พอ (เหลือ {stock_qty:g} ชิ้น)")
-
-                    return
 
                     
 
@@ -2002,7 +2006,7 @@ class MainWindow(QMainWindow):
 
         
 
-        version_label = QLabel("v1.2.26")
+        version_label = QLabel("v1.0.0")
 
         version_label.setStyleSheet("font-size: 13px; color: #64748b; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 8px;")
 
@@ -2432,6 +2436,13 @@ class MainWindow(QMainWindow):
 
     def toggle_shift(self):
 
+        if not getattr(self, 'logged_in_cashier', False):
+            QMessageBox.warning(self, "ยังไม่ได้เข้าสู่ระบบ", "กรุณาเข้าสู่ระบบแคชเชียร์ก่อนเปิดกะ")
+            return
+        if not self.config.get('pos_token'):
+            QMessageBox.warning(self, "ยังไม่ได้เชื่อมต่อ ERP", "กรุณาตั้งค่า Token และเข้าสู่ระบบก่อนเปิดกะ")
+            return
+
         headers = {
 
             'Authorization': f"Bearer {self.config.get('pos_token', '')}",
@@ -2787,6 +2798,21 @@ class MainWindow(QMainWindow):
 
     def check_active_shift(self, show_resume_dialog=False, force_resume=False):
         if not self.config.get('pos_token'): return
+
+        # When called at startup without interactive dialog, run in background thread to prevent UI freeze
+        if not show_resume_dialog and not force_resume:
+            import threading
+            t = threading.Thread(
+                target=self._execute_shift_check,
+                args=(False, False),
+                daemon=True
+            )
+            t.start()
+            return
+
+        self._execute_shift_check(show_resume_dialog=show_resume_dialog, force_resume=force_resume)
+
+    def _execute_shift_check(self, show_resume_dialog=False, force_resume=False):
         try:
             # Fetch Ping for network status
             ping_res = requests.get(
@@ -2892,46 +2918,88 @@ class MainWindow(QMainWindow):
 
 
     def show_today_revenue(self):
-
         from datetime import datetime
-
+        from collections import defaultdict
         session = init_db(f"sqlite:///{self.db_path}")
-
-        receipts = session.query(PosReceipt).all()
-
-        today_total = 0.0
-
-        today_count = 0
-
         now = datetime.now()
-
-        for r in receipts:
-
-            dt = r.created_at
-
+        today_sales = []
+        for sale in session.query(Sale).all():
+            dt = sale.created_at
             if isinstance(dt, str):
-
                 try:
-
                     dt = datetime.strptime(dt.split('.')[0], "%Y-%m-%d %H:%M:%S")
-
                 except Exception:
-
                     continue
+            if dt and dt.date() == now.date():
+                today_sales.append(sale)
 
-            if getattr(dt, 'day', None) == now.day and getattr(dt, 'month', None) == now.month and getattr(dt, 'year', None) == now.year:
-
-                today_total += r.total_amount
-
-                today_count += 1
-
-                
-
+        active_sales = [s for s in today_sales if s.status != 'cancelled']
+        today_total = sum(float(s.total_amount or 0) for s in active_sales)
+        today_count = len(active_sales)
+        void_count = sum(1 for s in today_sales if s.status == 'cancelled')
+        grouped = defaultdict(list)
+        for sale in active_sales:
+            grouped[sale.shift_id].append(sale)
+        shift_rows = []
+        shift_groups = []
+        for shift_id, sales in grouped.items():
+            shift = session.query(PosShift).filter_by(id=shift_id).first() if shift_id else None
+            opened_at = getattr(shift, 'opened_at', None) if shift else None
+            if opened_at:
+                from datetime import timedelta
+                opened_at = opened_at + timedelta(hours=7)
+            shift_groups.append((shift_id, sales, shift, opened_at))
+        shift_groups.sort(key=lambda row: (row[3] is None, row[3] or datetime.max))
+        for shift_id, sales, shift, opened_at in shift_groups:
+            hour = opened_at.hour if opened_at else None
+            if hour is None:
+                label = "กะไม่ระบุเวลา"
+            elif 5 <= hour < 12:
+                label = "กะเช้า"
+            elif 12 <= hour < 17:
+                label = "กะบ่าย"
+            elif 17 <= hour < 24:
+                label = "กะเย็น"
+            else:
+                label = "กะดึก"
+            terminal = self.config.get('terminal_code') or self.config.get('device_id') or 'B001'
+            shift_code = getattr(shift, 'server_id', None) or shift_id or '-'
+            opened_text = opened_at.strftime('%H:%M') if opened_at else '--:--'
+            shift_rows.append({'label': f"{label} • กะ #{shift_code} • เปิด {opened_text} • {terminal}", 'sales': sales, 'total': sum(float(s.total_amount or 0) for s in sales)})
         session.close()
 
-        QMessageBox.information(self, "สรุปรายได้วันนี้", f"จำนวนบิลวันนี้: {today_count} บิล\nยอดขายรวมวันนี้: ฿ {today_total:,.2f}")
-
-
+        dlg = QDialog(self)
+        dlg.setWindowTitle("สรุปรายได้วันนี้")
+        dlg.setMinimumSize(560, 440)
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel(f"จำนวนบิลวันนี้: {today_count} บิล | ยอดขายรวมวันนี้: ฿ {today_total:,.2f} | ยกเลิก: {void_count} บิล"))
+        layout.addWidget(QLabel("กดเลือกกะเพื่อดูเลขบิล เวลา และยอดของแต่ละบิล"))
+        shift_list = QListWidget()
+        detail = QLabel("เลือกกะด้านบน")
+        detail.setWordWrap(True)
+        detail.setStyleSheet("padding: 10px; color: #0f172a; background: #f8fafc; border: 1px solid #cbd5e1;")
+        for row in shift_rows:
+            item = QListWidgetItem(f"{row['label']}: {len(row['sales'])} บิล | ฿ {row['total']:,.2f}")
+            item.setData(Qt.UserRole, row)
+            shift_list.addItem(item)
+        def show_shift_detail(item):
+            row = item.data(Qt.UserRole)
+            detail_lines = [f"{row['label']} | {len(row['sales'])} บิล | รวม ฿ {row['total']:,.2f}"]
+            for sale in row['sales']:
+                dt = getattr(sale, 'created_at', None)
+                time_text = dt.strftime('%H:%M:%S') if dt else '-'
+                detail_lines.append(f"{sale.doc_number or sale.local_sale_id}: {time_text} | ฿ {float(sale.total_amount or 0):,.2f}")
+            detail.setText("\n".join(detail_lines))
+        shift_list.itemClicked.connect(show_shift_detail)
+        layout.addWidget(shift_list)
+        layout.addWidget(detail)
+        close_btn = QPushButton("ปิด")
+        close_btn.clicked.connect(dlg.accept)
+        layout.addWidget(close_btn)
+        if shift_list.count():
+            shift_list.setCurrentRow(0)
+            show_shift_detail(shift_list.item(0))
+        dlg.exec()
 
     def show_shift_z_report(self):
 
@@ -3872,15 +3940,11 @@ class MainWindow(QMainWindow):
 
             
 
-        note, ok = QInputDialog.getText(self, "พักบิลปัจจุบัน (Hold Bill)", "ระบุชื่อลูกค้าหรือหมายเหตุพักบิล (เว้นว่างได้):")
-
-        if not ok:
-
-            return
-
-            
-
-        note = note.strip() or "ลูกค้าพักบิล"
+        from datetime import datetime
+        import time
+        # Short four-digit reference that is easy for the customer to remember.
+        hold_code = f"{int(time.time()) % 10000:04d}"
+        note = hold_code
 
         
 
@@ -4010,13 +4074,11 @@ class MainWindow(QMainWindow):
 
                 
 
-        from datetime import datetime
-
         local_bills.append({
 
             "id": int(datetime.now().timestamp() * 1000),
 
-            "hold_no": f"H{len(local_bills) + 1:03d}",
+            "hold_no": hold_code,
 
             "label": note,
 
@@ -4058,7 +4120,7 @@ class MainWindow(QMainWindow):
 
         self.update_cart_total()
 
-        QMessageBox.information(self, "พักบิลสำเร็จ", f"พักบิล '{note}' เรียบร้อยแล้ว\nสามารถเปิดการขายให้ลูกค้ารายต่อไปได้ทันที")
+        QMessageBox.information(self, "พักบิลสำเร็จ", f"รหัสพักบิล: {hold_code}\nแจ้งรหัสนี้ให้ลูกค้าเพื่อใช้เรียกบิลกลับ\n\nสามารถเปิดการขายให้ลูกค้ารายต่อไปได้ทันที")
 
 
 

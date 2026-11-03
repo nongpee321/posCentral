@@ -80,8 +80,6 @@ class SyncWorker(QThread):
         return any(k in text_lower for k in keywords)
 
     def _resolve_discount_approver(self, shift_data=None, payload=None, fallback_cashier_id=None):
-        if payload and payload.get('discount_approved_by'):
-            return payload.get('discount_approved_by')
         if self.config:
             approver = (
                 self.config.get('discount_approved_by')
@@ -92,6 +90,8 @@ class SyncWorker(QThread):
                 return approver
         if isinstance(shift_data, dict) and shift_data.get('cashier_user_id'):
             return shift_data.get('cashier_user_id')
+        if payload and payload.get('discount_approved_by'):
+            return payload.get('discount_approved_by')
         if payload and payload.get('cashier_id'):
             return payload.get('cashier_id')
         return fallback_cashier_id or 1
@@ -314,6 +314,7 @@ class SyncWorker(QThread):
         while self.is_running:
 
             manual_sync = self.manual_sync_requested
+            self._manual_sync_active = manual_sync
 
             retry_failed = self.retry_failed_requested
 
@@ -397,11 +398,13 @@ class SyncWorker(QThread):
 
                     version_changed = self._check_catalog_version()
 
-                    # Sync products ทันทีถ้าเวอร์ชันเปลี่ยน หรือกด sync หรือทุก ~10 นาที
+                    # Poll the catalog every ~30 seconds as a fallback even when
+                    # the backend did not bump catalog_version. This keeps POS
+                    # prices, units, stock and promotions fresh automatically.
 
                     is_initial_run = getattr(self, '_last_catalog_version', None) is None
 
-                    if is_initial_run or version_changed or manual_sync or (loop_count % 60 == 0):
+                    if is_initial_run or version_changed or manual_sync or (loop_count % 3 == 0):
 
                         changed = self._sync_products()
 
@@ -1101,6 +1104,12 @@ class SyncWorker(QThread):
 
                 # Ensure offline sync flag is present
                 payload['is_offline_sync'] = True
+
+                # A manual Retry Sync is an explicit request to re-check a
+                # discount after the cashier/approver data has been refreshed.
+                # Do not keep a stale hold flag from the previous response.
+                if getattr(self, '_manual_sync_active', False):
+                    payload.pop('held_for_discount_review', None)
 
                 # If this bill previously failed due to discount/approval validation, hold it for inspection
                 # and never strip the discount or rewrite item prices to full catalog price.

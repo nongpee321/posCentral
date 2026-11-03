@@ -77,9 +77,11 @@ def test_bill_history_dialog_listing_and_filtering(qtbot, test_db):
     assert dlg.sales_table.item(0, 0).text() == "CSB00120261031002"
     assert dlg.sales_table.item(1, 0).text() == "CSB00120261031001"
 
-    # Discount check on row 1 (sale-001): -฿100.00
-    assert dlg.sales_table.item(1, 4).text() == "-฿100.00"
-    assert dlg.sales_table.item(1, 5).text() == "฿550.00"
+    # Discount check on row 1 (sale-001): -฿100.00 (col 5 in 9-col table, or col 4 in 8-col table)
+    disc_col = 5 if dlg.sales_table.columnCount() == 9 else 4
+    net_col = 6 if dlg.sales_table.columnCount() == 9 else 5
+    assert dlg.sales_table.item(1, disc_col).text() == "-฿100.00"
+    assert dlg.sales_table.item(1, net_col).text() == "฿550.00"
 
     # Filter search
     dlg.search_input.setText("CSB00120261031001")
