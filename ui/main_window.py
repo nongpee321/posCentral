@@ -6,7 +6,7 @@ import os
 
 import json
 
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QDoubleSpinBox, 
 
                                QHBoxLayout, QPushButton, QLabel, QLineEdit, 
 
