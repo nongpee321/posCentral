@@ -962,6 +962,56 @@ class MainWindow(QMainWindow):
 
 
 
+    def _prompt_scale_weight(self, prod_name):
+        """แสดงหน้าต่างกรอกน้ำหนักสินค้าพร้อมกล่องตัวเลขขนาดใหญ่ชัดเจน"""
+        dlg = QInputDialog(self)
+        dlg.setWindowTitle("สินค้าน้ำหนัก")
+        dlg.setLabelText(f"ระบุน้ำหนักสำหรับ '{prod_name}' (กก.):")
+        dlg.setInputMode(QInputDialog.InputMode.DoubleInput)
+        dlg.setDoubleValue(1.000)
+        dlg.setDoubleDecimals(3)
+        dlg.setDoubleRange(0.001, 999.000)
+        dlg.setDoubleStep(0.100)
+        dlg.setOkButtonText("ตกลง (OK)")
+        dlg.setCancelButtonText("ยกเลิก (Cancel)")
+        dlg.resize(460, 210)
+        dlg.setStyleSheet("""
+            QInputDialog {
+                background-color: #1e293b;
+            }
+            QLabel {
+                font-size: 16px;
+                font-weight: bold;
+                color: #f8fafc;
+                padding-bottom: 6px;
+            }
+            QDoubleSpinBox {
+                font-size: 32px;
+                font-weight: 900;
+                color: #0f172a;
+                background-color: #ffffff;
+                border: 3px solid #3b82f6;
+                border-radius: 8px;
+                padding: 6px 12px;
+                min-height: 52px;
+            }
+            QPushButton {
+                font-size: 15px;
+                font-weight: bold;
+                border-radius: 6px;
+                padding: 8px 18px;
+                min-width: 90px;
+                min-height: 36px;
+            }
+        """)
+        spin = dlg.findChild(QDoubleSpinBox)
+        if spin:
+            spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            spin.selectAll()
+        if dlg.exec() == QDialog.Accepted:
+            return dlg.doubleValue(), True
+        return 0.0, False
+
     def handle_product_click(self, product):
 
         from ui.scale_weight_dialog import is_scale_product
@@ -971,7 +1021,7 @@ class MainWindow(QMainWindow):
 
         if is_scale:
 
-            weight, ok = QInputDialog.getDouble(self, "สินค้าน้ำหนัก", f"ระบุน้ำหนักสำหรับ '{prod_name}' (กก.):", 1.0, 0.001, 999.0, 3)
+            weight, ok = self._prompt_scale_weight(prod_name)
 
             if ok and weight > 0:
 
@@ -1282,7 +1332,7 @@ class MainWindow(QMainWindow):
         if is_scale_product(product):
 
             name = product.get('name_th') if isinstance(product, dict) else product.name_th
-            weight, ok = QInputDialog.getDouble(self, "สินค้าน้ำหนัก", f"ระบุน้ำหนักสำหรับ '{name}' (กก.):", 1.0, 0.001, 999.0, 3)
+            weight, ok = self._prompt_scale_weight(name)
 
             if ok and weight > 0:
                 self.add_to_cart(product, qty=weight, is_scale=True)
