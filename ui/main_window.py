@@ -2056,7 +2056,7 @@ class MainWindow(QMainWindow):
 
         
 
-        version_label = QLabel("v2.0.0")
+        version_label = QLabel("v1.1.1")
 
         version_label.setStyleSheet("font-size: 13px; color: #64748b; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 8px;")
 
@@ -2294,11 +2294,15 @@ class MainWindow(QMainWindow):
 
         action_restore.triggered.connect(self.manual_restore_db)
 
-
-
         main_menu.addSeparator()
 
-        
+        action_stock = main_menu.addAction("ตรวจสอบสต็อกสินค้า (Check Stock)")
+        action_stock.triggered.connect(self.open_stock_check)
+
+        action_promo = main_menu.addAction("รายการโปรโมชั่น (Promotions)")
+        action_promo.triggered.connect(self.open_promotions_dialog)
+
+        main_menu.addSeparator()
 
         action_settings = main_menu.addAction("ตั้งค่าเชื่อมต่อ ERP (API & Token)")
 
@@ -3305,6 +3309,34 @@ class MainWindow(QMainWindow):
 
 
 
+
+    def open_promotions_dialog(self):
+        from ui.promotion_dialog import PromotionListDialog
+        branch_name = self.config.get('branch_name', 'สาขาปัจจุบัน')
+        worker = getattr(self, 'sync_worker', None)
+        dlg = PromotionListDialog(
+            self,
+            db_path=self.db_path,
+            branch_name=branch_name,
+            sync_worker=worker,
+            api_url=self.config.get('api_url', ''),
+            pos_token=self.config.get('pos_token', '')
+        )
+        dlg.exec()
+
+    def open_stock_check(self):
+        from ui.stock_dialog import StockCheckDialog
+        branch_name = self.config.get('branch_name', 'สาขาปัจจุบัน')
+        worker = getattr(self, 'sync_worker', None)
+        dlg = StockCheckDialog(
+            self,
+            db_path=self.db_path,
+            branch_name=branch_name,
+            sync_worker=worker,
+            api_url=self.config.get('api_url', ''),
+            pos_token=self.config.get('pos_token', '')
+        )
+        dlg.exec()
 
     def open_settings(self):
 
