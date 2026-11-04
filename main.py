@@ -243,17 +243,16 @@ def main():
         is_offline_login = getattr(token_dlg, 'is_offline_login', False)
         window = MainWindow(db_path=db_path, is_offline_login=is_offline_login)
         window.show()
-        # Open customer display only if explicitly configured (default is disabled on startup)
-        if config.get('auto_open_customer_display', False) and (config.get('device_id') or config.get('pos_token')):
-            def open_customer_display_fullscreen():
-                try:
+        # Auto open customer display on secondary screen if multiple screens exist
+        def open_customer_display_on_secondary():
+            try:
+                screens = app.screens()
+                # Open automatically if there is a secondary screen, or if auto_open_customer_display is True
+                if len(screens) > 1 or config.get('auto_open_customer_display', False):
                     window.toggle_customer_display()
-                    if window.customer_display:
-                        if not window.customer_display.isFullScreen():
-                            window.customer_display.toggle_fullscreen()
-                except Exception as exc:
-                    print(f"[POS] Customer display auto-open skipped: {exc}")
-            QTimer.singleShot(800, open_customer_display_fullscreen)
+            except Exception as exc:
+                print(f"[POS] Customer display startup launch skipped: {exc}")
+        QTimer.singleShot(800, open_customer_display_on_secondary)
         # Back up after the UI is visible so startup/login is not blocked by SQLite I/O.
         QTimer.singleShot(1500, lambda: backup_pos_db(db_path, comment="daily_startup"))
         sys.exit(app.exec())

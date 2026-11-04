@@ -420,6 +420,45 @@ class CustomerDisplayWindow(QMainWindow):
         if hasattr(self, 'vat_lbl'):
             self.vat_lbl.setText("0.00 ฿")
 
+    def move_to_secondary_screen(self, fullscreen=True):
+        """ย้ายหน้าต่างจอฝั่งลูกค้าไปยังหน้าจอที่ 2 (Secondary Screen) เสมอหากมี 2 จอขึ้นไป"""
+        try:
+            from PySide6.QtWidgets import QApplication
+            screens = QApplication.screens()
+            if len(screens) > 1:
+                main_screen = self.main_window.screen() if (self.main_window and hasattr(self.main_window, 'screen')) else QApplication.primaryScreen()
+                target_screen = None
+                for s in screens:
+                    if s != main_screen:
+                        target_screen = s
+                        break
+                if not target_screen:
+                    target_screen = screens[1]
+                
+                geo = target_screen.geometry()
+                # Ensure window handle is created
+                if not self.windowHandle():
+                    self.winId()
+                if self.windowHandle():
+                    self.windowHandle().setScreen(target_screen)
+                self.setGeometry(geo)
+                if fullscreen:
+                    self.showFullScreen()
+                    if hasattr(self, 'fullscreen_btn'):
+                        self.fullscreen_btn.setText("🗗")
+                        self.fullscreen_btn.setToolTip("ย่อจอ (Exit Fullscreen)")
+                else:
+                    self.showNormal()
+                return True
+            else:
+                # กรณีมีหน้าจอเดียว แสดงปกติเพื่อไม่บังหน้าจอหลัก
+                self.show()
+                return False
+        except Exception as e:
+            print(f"[POS] Error moving customer display to secondary screen: {e}")
+            self.show()
+            return False
+
     def toggle_fullscreen(self):
         if self.isFullScreen():
             self.showNormal()

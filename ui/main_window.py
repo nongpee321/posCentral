@@ -2314,7 +2314,7 @@ class MainWindow(QMainWindow):
 
         if self.customer_display.isHidden():
 
-            self.customer_display.show()
+            self.customer_display.move_to_secondary_screen(fullscreen=True)
 
         else:
 
