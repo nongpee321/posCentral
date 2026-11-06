@@ -2612,16 +2612,39 @@ class MainWindow(QMainWindow):
                         ShiftReportDialog(self, shift_payload).exec()
 
                     else:
+                        res.encoding = 'utf-8'
+                        try:
+                            res_json = res.json()
+                            err_msg = res_json.get('message', res.text)
+                        except Exception:
+                            err_msg = res.text or 'API Error'
 
-                        err_msg = res.json().get('message', res.text) if res.text else 'API Error'
+                        if isinstance(err_msg, str):
+                            try:
+                                fixed = err_msg.encode('latin1').decode('utf-8')
+                                if fixed:
+                                    err_msg = fixed
+                            except Exception:
+                                pass
 
-                        reply = QMessageBox.question(self, 'ข้อผิดพลาดจากเซิร์ฟเวอร์', f'เซิร์ฟเวอร์แจ้งว่า: {err_msg}\n\nคุณต้องการบังคับปิดกะในเครื่อง (Force Close) หรือไม่?', QMessageBox.Yes | QMessageBox.No)
-
-                        if reply == QMessageBox.Yes:
-
+                        # If shift was already closed on ERP or not found, close locally gracefully without scaring the user
+                        if any(kw in str(err_msg) for kw in ['ไม่พบ', 'ปิด', 'closed', 'not found']):
                             self._close_shift_local(dialog.counted_cash, synced=True)
-
-                            QMessageBox.information(self, 'สำเร็จ', 'บังคับปิดกะในเครื่องเรียบร้อยแล้ว')
+                            QMessageBox.information(
+                                self,
+                                "ปิดกะเรียบร้อย",
+                                "กะการทำงานในระบบถูกปิดเรียบร้อยแล้ว\nสถานะกะในเครื่องได้ถูกปรับเป็นปิดเรียบร้อยแล้ว"
+                            )
+                        else:
+                            reply = QMessageBox.question(
+                                self,
+                                'ข้อผิดพลาดจากเซิร์ฟเวอร์',
+                                f'เซิร์ฟเวอร์แจ้งว่า: {err_msg}\n\nคุณต้องการบังคับปิดกะในเครื่อง (Force Close) หรือไม่?',
+                                QMessageBox.Yes | QMessageBox.No
+                            )
+                            if reply == QMessageBox.Yes:
+                                self._close_shift_local(dialog.counted_cash, synced=True)
+                                QMessageBox.information(self, 'สำเร็จ', 'บังคับปิดกะในเครื่องเรียบร้อยแล้ว')
 
                 except requests.exceptions.RequestException:
 
@@ -2779,7 +2802,16 @@ class MainWindow(QMainWindow):
 
                     else:
 
-                        err_msg = res.json().get("message", res.text) if res.text else "API Error"
+                        res.encoding = 'utf-8'
+                        try:
+                            err_msg = res.json().get("message", res.text) if res.text else "API Error"
+                            if isinstance(err_msg, str):
+                                try:
+                                    err_msg = err_msg.encode('latin1').decode('utf-8')
+                                except Exception:
+                                    pass
+                        except Exception:
+                            err_msg = res.text or "API Error"
 
                         if "มีกะเปิดอยู่แล้ว" in str(err_msg):
 
