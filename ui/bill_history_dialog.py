@@ -765,6 +765,7 @@ class BillHistoryDialog(QDialog):
                     timeout=15
                 )
 
+                resp.encoding = 'utf-8'
                 if resp.status_code not in (200, 201):
                     err_msg = "เซิร์ฟเวอร์ปฏิเสธการยกเลิกบิล"
                     try:
@@ -772,6 +773,13 @@ class BillHistoryDialog(QDialog):
                         err_msg = resp_json.get('message', err_msg)
                     except Exception:
                         err_msg = f"HTTP {resp.status_code}: {resp.text[:200]}"
+                    if isinstance(err_msg, str):
+                        try:
+                            fixed = err_msg.encode('latin1').decode('utf-8')
+                            if fixed:
+                                err_msg = fixed
+                        except Exception:
+                            pass
                     QMessageBox.critical(self, "ไม่สามารถยกเลิกบิลได้", f"ERP แจ้งข้อผิดพลาด:\n{err_msg}")
                     return False
             except Exception as e:
