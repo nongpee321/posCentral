@@ -248,7 +248,9 @@ class SyncWorker(QThread):
 
             sales_count = session.query(Sale).filter(Sale.status.in_(['pending', 'failed'])).count()
             shifts_count = session.query(PosShift).filter(
-                PosShift.status == 'closed', PosShift.sync_status.in_(['pending', 'failed'])
+                PosShift.status == 'closed',
+                PosShift.sync_status.in_(['pending', 'failed']),
+                PosShift.server_id.isnot(None)
             ).count()
             outbox_shifts = session.query(Outbox).filter(
                 Outbox.event_type == 'shift_close', Outbox.status.in_(['pending', 'failed'])
@@ -1343,6 +1345,11 @@ class SyncWorker(QThread):
                         pass
 
                 if not target_server_id:
+                    shift.sync_status = 'synced'
+                    if matching_ob:
+                        matching_ob.status = 'synced'
+                        matching_ob.synced_at = datetime.utcnow()
+                    session.commit()
                     continue
 
                 close_body = {

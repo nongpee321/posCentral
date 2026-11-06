@@ -652,6 +652,8 @@ class PendingSyncDialog(QDialog):
 
 
             count = len(rows)
+            if hasattr(self.parent_window, 'update_pending_sync_badge'):
+                self.parent_window.update_pending_sync_badge(count)
 
             if count > 0:
 
