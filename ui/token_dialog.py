@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QIcon, QPixmap
 from urllib.parse import urlsplit
 
-VERSION_STRING = "1.1.7"
+VERSION_STRING = "1.1.8"
 
 class PosTokenLoginDialog(QDialog):
     """

@@ -54,13 +54,13 @@ class ScaleWeightDialog(QDialog):
     - ใส่จำนวนกิโลกรัม (กก.) ทศนิยม 3 ตำแหน่ง
     - คำนวณราคาและส่งเข้าตะกร้าสินค้า
     """
-    def __init__(self, parent=None, db_path="pos.db", target_product=None, initial_weight=1.000):
+    def __init__(self, parent=None, db_path="pos.db", target_product=None, initial_weight=0.00):
         super().__init__(parent)
         self.parent_window = parent
         self.db_path = db_path
         self.target_product = target_product
         self.selected_product = target_product if (target_product and is_scale_product(target_product)) else None
-        self.entered_weight = max(0.001, float(initial_weight or 1.000))
+        self.entered_weight = max(0.00, float(initial_weight or 0.00))
         self.products_list = []
 
         self.setWindowTitle("สินค้าชั่งน้ำหนัก (ระบุกิโลกรัม)")
@@ -183,9 +183,9 @@ class ScaleWeightDialog(QDialog):
 
         weight_row = QHBoxLayout()
         self.weight_input = QDoubleSpinBox()
-        self.weight_input.setDecimals(3)
-        self.weight_input.setRange(0.001, 999.000)
-        self.weight_input.setSingleStep(0.100)
+        self.weight_input.setDecimals(2)
+        self.weight_input.setRange(0.00, 999.00)
+        self.weight_input.setSingleStep(0.10)
         self.weight_input.setValue(self.entered_weight)
         self.weight_input.setStyleSheet("font-size: 20px; font-weight: bold; color: #0f172a; height: 44px; padding: 4px 8px;")
         self.weight_input.valueChanged.connect(self.update_calc_total)

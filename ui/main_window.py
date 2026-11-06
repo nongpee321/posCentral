@@ -971,15 +971,15 @@ class MainWindow(QMainWindow):
 
 
     def _prompt_scale_weight(self, prod_name):
-        """แสดงหน้าต่างกรอกน้ำหนักสินค้าพร้อมกล่องตัวเลขขนาดใหญ่ชัดเจน"""
+        """แสดงหน้าต่างกรอกน้ำหนักสินค้าพร้อมกล่องตัวเลขขนาดใหญ่ชัดเจน (ทศนิยม 2 ตำแหน่ง เริ่มต้น 0.00)"""
         dlg = QInputDialog(self)
         dlg.setWindowTitle("สินค้าน้ำหนัก")
         dlg.setLabelText(f"ระบุน้ำหนักสำหรับ '{prod_name}' (กก.):")
         dlg.setInputMode(QInputDialog.InputMode.DoubleInput)
-        dlg.setDoubleValue(1.000)
-        dlg.setDoubleDecimals(3)
-        dlg.setDoubleRange(0.001, 999.000)
-        dlg.setDoubleStep(0.100)
+        dlg.setDoubleValue(0.00)
+        dlg.setDoubleDecimals(2)
+        dlg.setDoubleRange(0.00, 9999.00)
+        dlg.setDoubleStep(0.10)
         dlg.setOkButtonText("ตกลง (OK)")
         dlg.setCancelButtonText("ยกเลิก (Cancel)")
         dlg.resize(460, 210)
@@ -1015,9 +1015,18 @@ class MainWindow(QMainWindow):
         spin = dlg.findChild(QDoubleSpinBox)
         if spin:
             spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            spin.selectAll()
+            line_edit = spin.findChild(QLineEdit)
+            if line_edit:
+                line_edit.setSelectAllOnFirstFocus(True)
+            QTimer.singleShot(0, spin.selectAll)
+            QTimer.singleShot(50, spin.selectAll)
+            QTimer.singleShot(150, spin.selectAll)
         if dlg.exec() == QDialog.Accepted:
-            return dlg.doubleValue(), True
+            val = round(dlg.doubleValue(), 2)
+            if val <= 0:
+                QMessageBox.warning(self, "แจ้งเตือน", "กรุณาระบุน้ำหนักมากกว่า 0 กก.")
+                return 0.0, False
+            return val, True
         return 0.0, False
 
     def handle_product_click(self, product):
@@ -1715,7 +1724,7 @@ class MainWindow(QMainWindow):
 
             
 
-            qty_item = QTableWidgetItem(f"{qty:g}")
+            qty_item = QTableWidgetItem(f"{qty:.2f}" if is_scale else f"{qty:g}")
 
             qty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -4091,7 +4100,7 @@ class MainWindow(QMainWindow):
         selected_row = selected_indexes[0].row() if selected_indexes else -1
 
         target_product = None
-        initial_weight = 1.000
+        initial_weight = 0.00
 
         if selected_row >= 0:
             name_item = self.cart_table.item(selected_row, 0)
@@ -4114,7 +4123,7 @@ class MainWindow(QMainWindow):
                         try:
                             initial_weight = float(qty_item.text())
                         except ValueError:
-                            initial_weight = 1.000
+                            initial_weight = 0.00
 
         dialog = ScaleWeightDialog(self, db_path=self.db_path, target_product=target_product, initial_weight=initial_weight)
 
@@ -4126,7 +4135,7 @@ class MainWindow(QMainWindow):
                     new_qty = dialog.entered_weight
                     price_item = self.cart_table.item(selected_row, 2)
                     price = float(price_item.text().replace(',', '')) if price_item else (dialog.selected_product.pos_price or dialog.selected_product.default_price or 0.0)
-                    self.cart_table.item(selected_row, 1).setText(f"{new_qty:.3f}")
+                    self.cart_table.item(selected_row, 1).setText(f"{new_qty:.2f}")
                     if self.cart_table.item(selected_row, 3):
                         self.cart_table.item(selected_row, 3).setText(f"{new_qty * price:.2f}")
                     self.update_cart_total()
