@@ -1,9 +1,22 @@
 param(
-    [string]$Version = "1.1.1"
+    [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+if (-not $Version) {
+    $tokenDialogPath = Join-Path $projectRoot "ui\token_dialog.py"
+    if (Test-Path $tokenDialogPath) {
+        $match = Select-String -Path $tokenDialogPath -Pattern 'VERSION_STRING\s*=\s*"([^"]+)"'
+        if ($match -and $match.Matches.Groups[1].Value) {
+            $Version = $match.Matches.Groups[1].Value
+        }
+    }
+    if (-not $Version) {
+        $Version = "1.1.2"
+    }
+}
 $python = if (Test-Path (Join-Path $projectRoot "venv\Scripts\python.exe")) {
     Join-Path $projectRoot "venv\Scripts\python.exe"
 } else {

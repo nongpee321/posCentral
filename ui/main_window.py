@@ -2077,7 +2077,8 @@ class MainWindow(QMainWindow):
 
         
 
-        version_label = QLabel("v1.1.1")
+        from ui.token_dialog import VERSION_STRING
+        version_label = QLabel(f"v{VERSION_STRING}")
 
         version_label.setStyleSheet("font-size: 13px; color: #64748b; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 8px;")
 
