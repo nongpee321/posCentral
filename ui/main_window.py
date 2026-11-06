@@ -504,6 +504,33 @@ class MainWindow(QMainWindow):
 
                 self.cashier_btn.hide()
 
+        # Restore active open shift from local SQLite if exists
+        try:
+            session = init_db(f"sqlite:///{self.db_path}")
+            active_loc_shift = session.query(PosShift).filter_by(status='open').order_by(PosShift.id.desc()).first()
+            if active_loc_shift:
+                op_c = float(active_loc_shift.opening_cash or 0.0)
+                exp_c = float(active_loc_shift.expected_cash or op_c)
+                self.current_shift = {
+                    'id': active_loc_shift.server_id or active_loc_shift.id,
+                    'server_id': active_loc_shift.server_id,
+                    'local_id': active_loc_shift.id,
+                    'branch_id': active_loc_shift.branch_id,
+                    'cashier_id': active_loc_shift.cashier_id,
+                    'cashier_name': active_loc_shift.cashier_name,
+                    'opening_cash': op_c,
+                    'expected_cash': exp_c,
+                    'status': 'open'
+                }
+                if hasattr(self, 'shift_btn'):
+                    self.shift_btn.setText("ปิดกะ")
+                    self.shift_btn.setStyleSheet("QPushButton { background-color: #3b82f6; border: none; color: white; padding: 5px 10px; border-radius: 6px; font-weight: bold;} QPushButton:hover { background-color: #2563eb; }")
+                if hasattr(self, "branch_label"):
+                    self.branch_label.show()
+            session.close()
+        except Exception as e:
+            print(f"[POS] Error restoring local shift: {e}")
+
         self.start_sync()
 
         self.check_active_shift()
@@ -2510,50 +2537,69 @@ class MainWindow(QMainWindow):
         if getattr(self, 'current_shift', None):
 
             # Refresh shift details from server before opening close dialog
-
             try:
-
                 shift_params = {}
-
                 if self.config.get('branch_id'):
-
                     shift_params['branch_id'] = self.config['branch_id']
-
                 if self.config.get('cashier_id'):
-
                     shift_params['cashier_id'] = self.config['cashier_id']
-
                 s_res = requests.get(
-
                     f"{self.config['api_url']}/api/pos/shift",
-
                     headers=headers,
-
                     params=shift_params,
-
                     timeout=5
-
                 )
-
                 if s_res.status_code == 200:
-
                     latest_shift = s_res.json().get('shift')
-
                     if latest_shift:
-
+                        old_op = self.current_shift.get('opening_cash')
+                        old_exp = self.current_shift.get('expected_cash')
                         self.current_shift.update(latest_shift)
-
+                        if not self.current_shift.get('opening_cash') and old_op:
+                            self.current_shift['opening_cash'] = old_op
+                        if not self.current_shift.get('expected_cash') and old_exp:
+                            self.current_shift['expected_cash'] = old_exp
             except Exception:
-
                 pass
 
+            # Calculate actual expected cash: opening_cash + local cash sales
+            opening_cash = float(self.current_shift.get('opening_cash') or self.current_shift.get('expected_cash') or 0.0)
+            expected_cash = float(self.current_shift.get('expected_cash') or opening_cash)
+            try:
+                session = init_db(f"sqlite:///{self.db_path}")
+                cur_shift_ids = [
+                    self.current_shift.get('local_id'),
+                    self.current_shift.get('id'),
+                    self.current_shift.get('server_id')
+                ]
+                cur_shift_ids = [s for s in cur_shift_ids if s is not None]
+                if self.current_shift.get('id') or self.current_shift.get('server_id'):
+                    s_id = self.current_shift.get('server_id') or self.current_shift.get('id')
+                    loc = session.query(PosShift).filter_by(server_id=s_id).first()
+                    if loc:
+                        if loc.id not in cur_shift_ids:
+                            cur_shift_ids.append(loc.id)
+                        if (not opening_cash or opening_cash == 0) and loc.opening_cash:
+                            opening_cash = float(loc.opening_cash)
 
+                cash_sales = 0.0
+                active_sales = session.query(Sale).filter(Sale.shift_id.in_(cur_shift_ids), Sale.status != 'cancelled').all()
+                for sale in active_sales:
+                    for payment in session.query(Payment).filter_by(sale_id=sale.local_sale_id, method='cash').all():
+                        cash_sales += float(payment.amount or 0.0)
+                session.close()
+
+                if expected_cash <= opening_cash:
+                    expected_cash = opening_cash + cash_sales
+            except Exception as e:
+                print(f"[POS] Error calculating expected cash: {e}")
+
+            self.current_shift['expected_cash'] = expected_cash
+            self.current_shift['opening_cash'] = opening_cash
 
             # Close Shift
-
             from ui.shift_dialog import ShiftCloseDialog
-
-            dialog = ShiftCloseDialog(self, expected_cash=float(self.current_shift.get('expected_cash', 0.0)))
+            dialog = ShiftCloseDialog(self, expected_cash=expected_cash)
 
             if dialog.exec() == QDialog.Accepted:
 
@@ -2684,16 +2730,15 @@ class MainWindow(QMainWindow):
 
                         local_id = self._open_shift_local(dialog.opening_cash, server_id=server_id, synced=True)
 
+                        op_c = float(dialog.opening_cash)
+                        exp_c = float(shift_obj.get('expected_cash') or shift_obj.get('opening_cash') or op_c)
                         if shift_obj:
-
                             self.current_shift = dict(shift_obj)
-
                             self.current_shift['server_id'] = server_id
-
                             self.current_shift['id'] = server_id
-
+                            self.current_shift['opening_cash'] = op_c
+                            self.current_shift['expected_cash'] = exp_c
                             if local_id:
-
                                 self.current_shift['local_id'] = local_id
 
                         msg_text = "เปิดกะเรียบร้อย (ออนไลน์)"
@@ -2922,8 +2967,8 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
 
-            # If force_resume is requested, fetch and attach active ERP shift
-            if force_resume or (not getattr(self, 'current_shift', None) and show_resume_dialog):
+            # Fetch and attach active ERP shift if open
+            if force_resume or not getattr(self, 'current_shift', None) or not self.current_shift.get('id'):
                 try:
                     shift_params = {}
                     if self.config.get('branch_id'):
@@ -2940,6 +2985,8 @@ class MainWindow(QMainWindow):
                         s_data = s_res.json().get('shift')
                         if s_data and s_data.get('id'):
                             server_id = s_data['id']
+                            op_c = float(s_data.get('opening_cash', 0.0) or 0.0)
+                            exp_c = float(s_data.get('expected_cash') or s_data.get('opening_cash') or op_c)
                             session = init_db(f"sqlite:///{self.db_path}")
                             loc_shift = session.query(PosShift).filter_by(server_id=server_id).first()
                             if not loc_shift:
@@ -2948,12 +2995,18 @@ class MainWindow(QMainWindow):
                                     branch_id=self.config.get('branch_id'),
                                     cashier_id=self.config.get('cashier_id'),
                                     cashier_name=self.config.get('cashier_name'),
-                                    opening_cash=float(s_data.get('opening_cash', 0.0) or 0.0),
-                                    expected_cash=float(s_data.get('expected_cash', 0.0) or 0.0),
+                                    opening_cash=op_c,
+                                    expected_cash=exp_c,
                                     status='open',
                                     sync_status='synced'
                                 )
                                 session.add(loc_shift)
+                                session.commit()
+                            else:
+                                if loc_shift.opening_cash is None or loc_shift.opening_cash == 0:
+                                    loc_shift.opening_cash = op_c
+                                if loc_shift.expected_cash is None or loc_shift.expected_cash == 0:
+                                    loc_shift.expected_cash = exp_c
                                 session.commit()
                             local_id = loc_shift.id
                             session.close()
@@ -2962,6 +3015,8 @@ class MainWindow(QMainWindow):
                             self.current_shift['id'] = server_id
                             self.current_shift['server_id'] = server_id
                             self.current_shift['local_id'] = local_id
+                            self.current_shift['opening_cash'] = op_c
+                            self.current_shift['expected_cash'] = exp_c
 
                             self.shift_btn.setText("ปิดกะ")
                             if hasattr(self, "branch_label"): self.branch_label.show()

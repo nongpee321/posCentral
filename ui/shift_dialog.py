@@ -126,6 +126,8 @@ class ShiftOpenDialog(QDialog):
             if self.opening_cash < 0:
                 raise ValueError
             self.opening_note = self.note_input.text().strip()
+            if not self.opening_note and self.opening_cash > 0:
+                self.opening_note = "เงินทอนเปิดกะ"
             self.accept()
         except ValueError:
             QMessageBox.warning(self, "แจ้งเตือน", "กรุณาใส่จำนวนเงินให้ถูกต้อง")
@@ -133,11 +135,26 @@ class ShiftOpenDialog(QDialog):
 class ShiftCloseDialog(QDialog):
     def __init__(self, parent=None, expected_cash=0.0):
         super().__init__(parent)
+        self.setObjectName("ShiftCloseDialog")
         self.setWindowTitle("ปิดกะ (Close Shift)")
         self.setFixedSize(400, 300)
-        self.setStyleSheet("background-color: white; color: #111827;")
+        self.setStyleSheet("""
+            #ShiftCloseDialog {
+                background-color: white;
+                color: #111827;
+            }
+            QLabel {
+                color: #111827;
+            }
+            QMessageBox {
+                background-color: #ffffff;
+            }
+            QMessageBox QLabel {
+                color: #0f172a;
+            }
+        """)
         
-        self.expected_cash = expected_cash
+        self.expected_cash = float(expected_cash or 0.0)
         self.counted_cash = 0.0
         self.init_ui()
         
@@ -159,7 +176,11 @@ class ShiftCloseDialog(QDialog):
         lbl.setStyleSheet("font-size: 16px; color: #374151;")
         
         self.amount_input = QLineEdit()
-        self.amount_input.setPlaceholderText("0.00")
+        if self.expected_cash > 0:
+            self.amount_input.setText(f"{self.expected_cash:.2f}")
+            self.amount_input.selectAll()
+        else:
+            self.amount_input.setPlaceholderText("0.00")
         self.amount_input.setStyleSheet("font-size: 20px; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px;")
         
         input_layout.addWidget(lbl)

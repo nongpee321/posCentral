@@ -24,11 +24,12 @@ class PromotionListDialog(QDialog):
         self.api_url = (api_url or '').rstrip('/')
         self.pos_token = pos_token or ''
 
+        self.setObjectName("PromotionDialog")
         self.setWindowTitle(f"รายการโปรโมชั่น - {self.branch_name}")
         self.resize(1000, 620)
         self.setMinimumSize(850, 500)
         self.setStyleSheet("""
-            QDialog {
+            #PromotionDialog {
                 background-color: #1e293b;
                 color: #ffffff;
             }

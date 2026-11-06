@@ -26,11 +26,12 @@ class StockCheckDialog(QDialog):
         self.pos_token = pos_token
         self.categories_map = {}
 
+        self.setObjectName("StockDialog")
         self.setWindowTitle(f"ตรวจสอบสต็อกสินค้าคงเหลือ - {self.branch_name}")
         self.resize(980, 620)
         self.setMinimumSize(820, 520)
         self.setStyleSheet("""
-            QDialog {
+            #StockDialog {
                 background-color: #1e293b;
                 color: #ffffff;
             }
