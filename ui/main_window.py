@@ -1015,9 +1015,6 @@ class MainWindow(QMainWindow):
         spin = dlg.findChild(QDoubleSpinBox)
         if spin:
             spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            line_edit = spin.findChild(QLineEdit)
-            if line_edit:
-                line_edit.setSelectAllOnFirstFocus(True)
             QTimer.singleShot(0, spin.selectAll)
             QTimer.singleShot(50, spin.selectAll)
             QTimer.singleShot(150, spin.selectAll)
@@ -5106,22 +5103,22 @@ class MainWindow(QMainWindow):
                 
 
             totals = self._compute_rounded_totals(total_amount)
-
-            discount = totals['total_discount']
-
+            manual_discount = totals['manual_discount']
+            promo_discount = totals['promo_discount']
+            total_discount = totals['total_discount']
             grand_total = totals['grand_total']
-
-            
 
             from ui.payment_dialog import PaymentDialog
             from ui.help_dialog import HelpDialog
-            dialog = PaymentDialog(self, grand_total, total_items, total_qty, discount_amount=discount)
+            dialog = PaymentDialog(self, grand_total, total_items, total_qty, discount_amount=manual_discount, promo_discount=promo_discount)
             
             if hasattr(self, 'customer_display') and self.customer_display and not self.customer_display.isHidden():
-                self.customer_display.show_payment("QR", override_amount=grand_total, discount=discount)
+                self.customer_display.show_payment("QR", override_amount=grand_total, discount=total_discount)
                 
             if dialog.exec() == QDialog.Accepted:
-                if hasattr(dialog, 'discount_amount'):
+                if hasattr(dialog, 'manual_discount'):
+                    self.discount_amount = float(dialog.manual_discount or 0.0)
+                elif hasattr(dialog, 'discount_amount'):
                     self.discount_amount = float(dialog.discount_amount or 0.0)
                 if hasattr(self, 'customer_display') and self.customer_display and not self.customer_display.isHidden():
                     self.customer_display.show_payment("SUCCESS")

@@ -329,7 +329,8 @@ def print_escpos_receipt(printer_name, receipt_data, config):
     if total_disc > 0:
         cmds += enc(f"รวมเป็นเงิน: {subtotal:,.2f}") + LINE_FEED
         if promo_disc > 0:
-            p_lbl = f" ({promo_name})" if promo_name else ""
+            short_pname = _truncate_thai_visual(promo_name, 16) if promo_name else ""
+            p_lbl = f" ({short_pname})" if short_pname else ""
             cmds += enc(f"โปรโมชั่น{p_lbl}: -{promo_disc:,.2f}") + LINE_FEED
         if manual_disc > 0:
             cmds += enc(f"ส่วนลดพิเศษ: -{manual_disc:,.2f}") + LINE_FEED
@@ -937,7 +938,8 @@ class ReceiptDialog(QDialog):
 
         discount_html = ""
         if promo_disc > Decimal('0.00'):
-            p_lbl = f" ({promo_name})" if promo_name else ""
+            short_pname = _truncate_thai_visual(promo_name, 12 if is_narrow else 14) if promo_name else ""
+            p_lbl = f" ({short_pname})" if short_pname else ""
             discount_html += f'<tr class="item-row"><td colspan="2" class="item-desc">โปรโมชั่น{p_lbl}</td><td class="unit"></td><td class="amount">-{promo_disc:,.2f}&nbsp;&nbsp;</td></tr>'
         if manual_disc > Decimal('0.00'):
             discount_html += f'<tr class="item-row"><td colspan="2" class="item-desc">ส่วนลดพิเศษ</td><td class="unit"></td><td class="amount">-{manual_disc:,.2f}&nbsp;&nbsp;</td></tr>'

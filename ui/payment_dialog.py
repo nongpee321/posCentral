@@ -50,15 +50,18 @@ class IdleTimeoutDialog(QDialog):
             self.reject()
 
 class PaymentDialog(QDialog):
-    def __init__(self, parent=None, total_amount=0.0, total_items=0, total_qty=0.0, discount_amount=0.0):
+    def __init__(self, parent=None, total_amount=0.0, total_items=0, total_qty=0.0, discount_amount=0.0, promo_discount=0.0):
         super().__init__(parent)
         self.setWindowTitle("รับชำระเงิน")
         self.setFixedSize(850, 620)
         self.setStyleSheet("background-color: white; color: #111827;")
         
-        self.discount_amount = float(discount_amount or 0.0)
+        self.manual_discount = float(discount_amount or 0.0)
+        self.promo_discount = float(promo_discount or 0.0)
+        self.discount_amount = self.manual_discount
+        self.total_discount = self.manual_discount + self.promo_discount
         self.total_amount = float(total_amount or 0.0)
-        self.subtotal = float(total_amount or 0.0) + self.discount_amount
+        self.subtotal = float(total_amount or 0.0) + self.total_discount
         self.total_items = total_items
         self.total_qty = total_qty
         
@@ -284,9 +287,14 @@ class PaymentDialog(QDialog):
 
         add_summary_row("จำนวนรายการ", f"{self.total_items}")
         add_summary_row("จำนวนชิ้น", f"{self.total_qty:g}")
-        if self.subtotal > self.total_amount or self.discount_amount > 0:
+        if self.subtotal > self.total_amount or self.total_discount > 0:
             add_summary_row("ยอดรวมเดิม", f"฿{self.subtotal:,.2f}")
-            add_summary_row("ส่วนลด", f"-฿{self.discount_amount:,.2f}", is_discount=True)
+            if self.promo_discount > 0:
+                add_summary_row("ส่วนลดโปรโมชั่น", f"-฿{self.promo_discount:,.2f}", is_discount=True)
+            if self.manual_discount > 0:
+                add_summary_row("ส่วนลดพิเศษ", f"-฿{self.manual_discount:,.2f}", is_discount=True)
+            elif self.promo_discount <= 0 and self.total_discount > 0:
+                add_summary_row("ส่วนลด", f"-฿{self.total_discount:,.2f}", is_discount=True)
 
         self.total_lbl = QLabel(f"฿ {self.total_amount:,.2f}")
         self.total_lbl.setStyleSheet("font-size: 32px; font-weight: bold; color: #10b981; margin-top: 6px; border: none;")
@@ -296,12 +304,15 @@ class PaymentDialog(QDialog):
     def prompt_discount(self):
         from ui.discount_dialog import DiscountDialog
         cur_label = getattr(self.parent(), 'discount_label', '') if self.parent() else ''
-        dlg = DiscountDialog(self, subtotal=self.subtotal, current_discount=self.discount_amount, current_label=cur_label)
+        subtotal_for_manual = max(0.0, self.subtotal - self.promo_discount)
+        dlg = DiscountDialog(self, subtotal=subtotal_for_manual, current_discount=self.manual_discount, current_label=cur_label)
         if dlg.exec() == QDialog.Accepted:
-            self.discount_amount = dlg.discount_amount
-            self.total_amount = max(0.0, round(self.subtotal - self.discount_amount, 2))
+            self.manual_discount = float(dlg.discount_amount or 0.0)
+            self.discount_amount = self.manual_discount
+            self.total_discount = self.manual_discount + self.promo_discount
+            self.total_amount = max(0.0, round(self.subtotal - self.total_discount, 2))
             if self.parent():
-                self.parent().discount_amount = self.discount_amount
+                self.parent().discount_amount = self.manual_discount
                 self.parent().discount_label = dlg.discount_label
                 if hasattr(self.parent(), 'update_cart_total'):
                     self.parent().update_cart_total()
