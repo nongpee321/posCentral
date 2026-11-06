@@ -1113,10 +1113,11 @@ class SyncWorker(QThread):
                 if getattr(self, '_manual_sync_active', False):
                     payload.pop('held_for_discount_review', None)
 
-                # If this bill previously failed due to discount/approval validation, hold it for inspection
-                # and never strip the discount or rewrite item prices to full catalog price.
+                if getattr(self, '_manual_sync_active', False):
+                    payload.pop('held_for_discount_review', None)
+
                 prev_error = entry.last_error or (sale.sync_error if sale else '') or ''
-                if entry.status == 'failed' and (
+                if not getattr(self, '_manual_sync_active', False) and entry.status == 'failed' and (
                     payload.get('held_for_discount_review')
                     or self._is_discount_or_approval_error(prev_error)
                 ):

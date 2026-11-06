@@ -1858,30 +1858,9 @@ class MainWindow(QMainWindow):
 
     def on_edit_bill_clicked(self):
         """
-        ปุ่มแก้ไขบิล:
-        - หากมีรายการในตะกร้า: ให้เลือกว่าจะแก้ไขรายการในตะกร้า หรือดึงบิลเดิมจากประวัติมาแก้ไข
-        - หากไม่มีรายการในตะกร้า: เปิดหน้าประวัติบิลเพื่อเลือกบิลมาแก้ไขทันที
+        ปุ่มแก้ไขบิล: เปิดหน้าประวัติบิลเพื่อเลือกบิลมาแก้ไขทันที
         """
-        if self.cart_table.rowCount() > 0:
-            msg = QMessageBox(self)
-            msg.setWindowTitle("แก้ไขบิล / แก้ไขรายการ")
-            msg.setText("พบรายการสินค้าอยู่ในตะกร้า\nกรุณาเลือกว่าต้องการทำรายการใด:")
-            btn_edit_cart = msg.addButton("แก้ไขรายการสินค้าในตะกร้า", QMessageBox.ButtonRole.AcceptRole)
-            btn_edit_cart.setStyleSheet("background-color: #f59e0b; color: white; font-weight: bold; padding: 8px 14px; border-radius: 6px;")
-            btn_edit_bill = msg.addButton("ดึงบิลเดิมจากประวัติมาแก้ไข", QMessageBox.ButtonRole.ActionRole)
-            btn_edit_bill.setStyleSheet("background-color: #0284c7; color: white; font-weight: bold; padding: 8px 14px; border-radius: 6px;")
-            btn_cancel = msg.addButton("ยกเลิก", QMessageBox.ButtonRole.RejectRole)
-            btn_cancel.setStyleSheet("background-color: #94a3b8; color: white; font-weight: bold; padding: 8px 14px; border-radius: 6px;")
-            msg.exec()
-
-            if msg.clickedButton() == btn_edit_cart:
-                selected_rows = self.cart_table.selectionModel().selectedRows()
-                target_row = selected_rows[0].row() if selected_rows else 0
-                self.open_cart_item_editor(target_row)
-            elif msg.clickedButton() == btn_edit_bill:
-                self.open_bill_history_dialog()
-        else:
-            self.open_bill_history_dialog()
+        self.open_bill_history_dialog()
 
         
 
