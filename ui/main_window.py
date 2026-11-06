@@ -1762,38 +1762,7 @@ class MainWindow(QMainWindow):
 
             
 
-            manage_widget = QWidget()
-
-            manage_layout = QHBoxLayout(manage_widget)
-
-            manage_layout.setContentsMargins(0, 0, 0, 0)
-
-            manage_layout.setSpacing(4)
-
-            
-
-            edit_btn = QPushButton("แก้ไข")
-
-            edit_btn.setStyleSheet("background-color: #f59e0b; color: white; border-radius: 4px; padding: 4px 8px;")
-
-            edit_btn.clicked.connect(self.edit_cart_item)
-
-            
-
-            del_btn = QPushButton("ลบ")
-
-            del_btn.setStyleSheet("background-color: #ef4444; color: white; border-radius: 4px; padding: 4px 8px;")
-
-            del_btn.clicked.connect(self.edit_cart_item)
-
-            
-
-            manage_layout.addWidget(edit_btn)
-
-            manage_layout.addWidget(del_btn)
-
-            
-
+            manage_widget = self._create_cart_row_manage_widget(row)
             self.cart_table.setCellWidget(row, 4, manage_widget)
 
             
@@ -1806,107 +1775,132 @@ class MainWindow(QMainWindow):
 
             QMessageBox.critical(self, "Error", f"Error adding product:\n{traceback.format_exc()}")
 
+    def _create_cart_row_manage_widget(self, row=None):
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        edit_btn = QPushButton("แก้ไข")
+        edit_btn.setToolTip("แก้ไขจำนวน หรือน้ำหนักสินค้า")
+        edit_btn.setStyleSheet("background-color: #f59e0b; color: white; border-radius: 4px; padding: 4px 8px; font-size: 11px; font-weight: bold;")
+        edit_btn.clicked.connect(self.edit_cart_item)
+
+        del_btn = QPushButton("ลบ")
+        del_btn.setToolTip("ลบรายการนี้ออกจากตะกร้า")
+        del_btn.setStyleSheet("background-color: #ef4444; color: white; border-radius: 4px; padding: 4px 8px; font-size: 11px; font-weight: bold;")
+        del_btn.clicked.connect(self.delete_cart_item)
+
+        layout.addWidget(edit_btn)
+        layout.addWidget(del_btn)
+        return widget
+
+    def on_cart_cell_double_clicked(self, row, col):
+        if col != 4:
+            self.open_cart_item_editor(row)
+
     def edit_cart_item(self):
-
         try:
-
             button = self.sender()
+            row = -1
+            if button and button.parent():
+                index = self.cart_table.indexAt(button.parent().pos())
+                if index.isValid():
+                    row = index.row()
+            if row < 0:
+                rows = self.cart_table.selectionModel().selectedRows()
+                if rows:
+                    row = rows[0].row()
+            if row >= 0:
+                self.open_cart_item_editor(row)
+        except Exception as e:
+            import traceback
+            QMessageBox.critical(self, "ข้อผิดพลาด", f"ไม่สามารถเปิดแก้ไขรายการได้:\n{traceback.format_exc()}")
 
-            if not button: return
-
-            index = self.cart_table.indexAt(button.parent().pos())
-
-            if not index.isValid(): return
-
-            row = index.row()
-
-            
-
-            if button.text() == "ลบ":
-
-                self.cart_table.removeRow(row)
-
-                self.update_cart_total()
-
+    def open_cart_item_editor(self, row):
+        try:
+            if row < 0 or row >= self.cart_table.rowCount():
+                return
+            name_item = self.cart_table.item(row, 0)
+            qty_item = self.cart_table.item(row, 1)
+            price_item = self.cart_table.item(row, 2)
+            total_item = self.cart_table.item(row, 3)
+            if not (name_item and qty_item and price_item):
                 return
 
-                
-
-            qty_item = self.cart_table.item(row, 1)
-
-            if not qty_item: return
-
-            
-
-            product_id = self.cart_table.item(row, 0).data(Qt.UserRole)
-
-            session = init_db(f'sqlite:///{self.db_path}')
-
-            from database.models import Product
-
-            db_product = session.query(Product).filter_by(id=product_id).first()
-
-            stock_qty = db_product.stock_qty if db_product and db_product.stock_qty is not None else 999999
-
-            session.close()
-
-            
-
+            prod_name = name_item.text()
             current_qty = float(qty_item.text())
+            unit_price = float(price_item.text())
 
-            new_qty, ok = QInputDialog.getDouble(self, "แก้ไขจำนวน", "จำนวนใหม่:", current_qty, 0.01, 9999, 2)
-
-            
-
-            if ok:
-
-                    
-
-                qty_item.setText(str(new_qty))
-
-                price_item = self.cart_table.item(row, 2)
-
-                if price_item:
-
-                    price = float(price_item.text())
-
-                    total_item = self.cart_table.item(row, 3)
-
+            from ui.cart_item_edit_dialog import CartItemEditDialog
+            dlg = CartItemEditDialog(
+                parent=self,
+                product_name=prod_name,
+                current_qty=current_qty,
+                unit_price=unit_price
+            )
+            if dlg.exec():
+                if dlg.was_deleted:
+                    self.cart_table.removeRow(row)
+                    self.update_cart_total()
+                else:
+                    new_qty = dlg.result_qty
+                    new_price = dlg.result_price
+                    new_tot = round(new_qty * new_price, 2)
+                    qty_item.setText(f"{new_qty:g}")
+                    price_item.setText(f"{new_price:.2f}")
                     if total_item:
-
-                        total_item.setText(f"{new_qty * price:.2f}")
-
-                self.update_cart_total()
-
+                        total_item.setText(f"{new_tot:.2f}")
+                    self.update_cart_total()
         except Exception as e:
-
             import traceback
-
-            QMessageBox.critical(self, "Error", f"Error editing cart:\n{traceback.format_exc()}")
+            QMessageBox.critical(self, "ข้อผิดพลาด", f"เกิดข้อผิดพลาดในการแก้ไขรายการ:\n{traceback.format_exc()}")
 
     def delete_cart_item(self):
-
         try:
-
             button = self.sender()
-
-            if not button: return
-
-            index = self.cart_table.indexAt(button.parent().pos())
-
-            if not index.isValid(): return
-
-            row = index.row()
-
-            self.cart_table.removeRow(row)
-
-            self.update_cart_total()
-
+            row = -1
+            if button and button.parent():
+                index = self.cart_table.indexAt(button.parent().pos())
+                if index.isValid():
+                    row = index.row()
+            if row < 0:
+                rows = self.cart_table.selectionModel().selectedRows()
+                if rows:
+                    row = rows[0].row()
+            if row >= 0:
+                self.cart_table.removeRow(row)
+                self.update_cart_total()
         except Exception as e:
-
             import traceback
+            QMessageBox.critical(self, "ข้อผิดพลาด", f"เกิดข้อผิดพลาดในการลบรายการ:\n{traceback.format_exc()}")
 
-            QMessageBox.critical(self, "Error", f"Error deleting item:\n{traceback.format_exc()}")
+    def on_edit_bill_clicked(self):
+        """
+        ปุ่มแก้ไขบิล:
+        - หากมีรายการในตะกร้า: ให้เลือกว่าจะแก้ไขรายการในตะกร้า หรือดึงบิลเดิมจากประวัติมาแก้ไข
+        - หากไม่มีรายการในตะกร้า: เปิดหน้าประวัติบิลเพื่อเลือกบิลมาแก้ไขทันที
+        """
+        if self.cart_table.rowCount() > 0:
+            msg = QMessageBox(self)
+            msg.setWindowTitle("แก้ไขบิล / แก้ไขรายการ")
+            msg.setText("พบรายการสินค้าอยู่ในตะกร้า\nกรุณาเลือกว่าต้องการทำรายการใด:")
+            btn_edit_cart = msg.addButton("แก้ไขรายการสินค้าในตะกร้า", QMessageBox.ButtonRole.AcceptRole)
+            btn_edit_cart.setStyleSheet("background-color: #f59e0b; color: white; font-weight: bold; padding: 8px 14px; border-radius: 6px;")
+            btn_edit_bill = msg.addButton("ดึงบิลเดิมจากประวัติมาแก้ไข", QMessageBox.ButtonRole.ActionRole)
+            btn_edit_bill.setStyleSheet("background-color: #0284c7; color: white; font-weight: bold; padding: 8px 14px; border-radius: 6px;")
+            btn_cancel = msg.addButton("ยกเลิก", QMessageBox.ButtonRole.RejectRole)
+            btn_cancel.setStyleSheet("background-color: #94a3b8; color: white; font-weight: bold; padding: 8px 14px; border-radius: 6px;")
+            msg.exec()
+
+            if msg.clickedButton() == btn_edit_cart:
+                selected_rows = self.cart_table.selectionModel().selectedRows()
+                target_row = selected_rows[0].row() if selected_rows else 0
+                self.open_cart_item_editor(target_row)
+            elif msg.clickedButton() == btn_edit_bill:
+                self.open_bill_history_dialog()
+        else:
+            self.open_bill_history_dialog()
 
         
 
@@ -3614,6 +3608,11 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(title)
 
+        self.editing_banner = QLabel("")
+        self.editing_banner.setVisible(False)
+        self.editing_banner.setStyleSheet("background-color: #fef3c7; color: #92400e; padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 13px; border: 1px solid #fde68a;")
+        layout.addWidget(self.editing_banner)
+
         
 
         # Cart Table
@@ -3679,6 +3678,7 @@ class MainWindow(QMainWindow):
         """)
 
         self.cart_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.cart_table.cellDoubleClicked.connect(self.on_cart_cell_double_clicked)
 
         layout.addWidget(self.cart_table)
 
@@ -3834,6 +3834,11 @@ class MainWindow(QMainWindow):
 
         self.recall_btn.clicked.connect(self.recall_held_bills)
 
+        self.edit_bill_btn = QPushButton("แก้ไขบิล")
+        self.edit_bill_btn.setToolTip("แก้ไขรายการสินค้าในตะกร้า หรือดึงบิลเดิมจากประวัติมาแก้ไข")
+        self.edit_bill_btn.setStyleSheet("background-color: #d97706; color: white; border-radius: 6px; padding: 8px 12px; font-size: 13px; font-weight: bold;")
+        self.edit_bill_btn.clicked.connect(self.on_edit_bill_clicked)
+
         self.history_btn = QPushButton("ประวัติบิล")
 
         self.history_btn.setToolTip("ดูประวัติบิลที่ขายไป, พิมพ์ใบเสร็จซ้ำ, หรือยกเลิก/แก้ไขบิล")
@@ -3849,6 +3854,8 @@ class MainWindow(QMainWindow):
         aux_btn_layout.addWidget(self.hold_btn)
 
         aux_btn_layout.addWidget(self.recall_btn)
+
+        aux_btn_layout.addWidget(self.edit_bill_btn)
 
         aux_btn_layout.addWidget(self.history_btn)
 
@@ -4417,6 +4424,8 @@ class MainWindow(QMainWindow):
         self._active_cashier_pin = ""
 
         self.cart_table.setRowCount(0)
+        if hasattr(self, 'editing_banner'):
+            self.editing_banner.setVisible(False)
 
         self.update_cart_total()
 
@@ -4477,14 +4486,7 @@ class MainWindow(QMainWindow):
                 self.cart_table.setItem(row, 2, price_item)
                 self.cart_table.setItem(row, 3, total_item)
 
-                manage_widget = QWidget()
-                manage_layout = QHBoxLayout(manage_widget)
-                manage_layout.setContentsMargins(0, 0, 0, 0)
-                manage_layout.setSpacing(4)
-                del_btn = QPushButton("ลบ")
-                del_btn.setStyleSheet("background-color: #ef4444; color: white; border-radius: 4px; padding: 4px 8px; font-size: 11px; font-weight: bold;")
-                del_btn.clicked.connect(lambda _, r=row: self.delete_cart_row(r))
-                manage_layout.addWidget(del_btn)
+                manage_widget = self._create_cart_row_manage_widget(row)
                 self.cart_table.setCellWidget(row, 4, manage_widget)
 
             # Restore discount
@@ -4496,6 +4498,9 @@ class MainWindow(QMainWindow):
             self.update_cart_total()
             self._record_shift_activity('edited')
             doc_no = sale.get('doc_number') if isinstance(sale, dict) else getattr(sale, 'doc_number', '')
+            if hasattr(self, 'editing_banner'):
+                self.editing_banner.setText(f"กำลังแก้ไขบิลเดิม: {doc_no} (แก้ไขรายการแล้วกดชำระเงินเพื่อบันทึกบิลใหม่)")
+                self.editing_banner.setVisible(True)
             parent_widget = self if isinstance(self, QWidget) else None
             QMessageBox.information(
                 parent_widget,
@@ -4718,30 +4723,7 @@ class MainWindow(QMainWindow):
 
                 # Manage widget buttons
 
-                manage_widget = QWidget()
-
-                manage_layout = QHBoxLayout(manage_widget)
-
-                manage_layout.setContentsMargins(0, 0, 0, 0)
-
-                manage_layout.setSpacing(4)
-
-                edit_btn = QPushButton("แก้ไข")
-
-                edit_btn.setStyleSheet("background-color: #f59e0b; color: white; border-radius: 4px; padding: 4px 8px;")
-
-                edit_btn.clicked.connect(self.edit_cart_item)
-
-                del_btn = QPushButton("ลบ")
-
-                del_btn.setStyleSheet("background-color: #ef4444; color: white; border-radius: 4px; padding: 4px 8px;")
-
-                del_btn.clicked.connect(self.edit_cart_item)
-
-                manage_layout.addWidget(edit_btn)
-
-                manage_layout.addWidget(del_btn)
-
+                manage_widget = self._create_cart_row_manage_widget(row)
                 self.cart_table.setCellWidget(row, 4, manage_widget)
 
                 
@@ -4935,6 +4917,8 @@ class MainWindow(QMainWindow):
             
 
             self.cart_table.setRowCount(0)
+            if hasattr(self, 'editing_banner'):
+                self.editing_banner.setVisible(False)
 
             self.update_cart_total()
 
@@ -5483,6 +5467,8 @@ class MainWindow(QMainWindow):
             
 
             self.cart_table.setRowCount(0)
+            if hasattr(self, 'editing_banner'):
+                self.editing_banner.setVisible(False)
 
             self.update_cart_total()
 

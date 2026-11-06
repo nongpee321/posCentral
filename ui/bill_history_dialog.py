@@ -449,10 +449,13 @@ class BillHistoryDialog(QDialog):
             self.sales_table.setItem(row, 7, pm_item)
             self.sales_table.setItem(row, 8, st_item)
 
-        self.reprint_btn.setEnabled(False)
-        self.edit_btn.setEnabled(False)
-        self.void_btn.setEnabled(False)
-        self.items_table.setRowCount(0)
+        if self.sales_table.rowCount() > 0:
+            self.sales_table.selectRow(0)
+        else:
+            self.reprint_btn.setEnabled(False)
+            self.edit_btn.setEnabled(False)
+            self.void_btn.setEnabled(False)
+            self.items_table.setRowCount(0)
         self.detail_info_lbl.setText("กรุณาเลือกบิลจากตารางด้านบน")
 
     def filter_table(self, query):
