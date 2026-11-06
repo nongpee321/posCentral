@@ -504,32 +504,13 @@ class MainWindow(QMainWindow):
 
                 self.cashier_btn.hide()
 
-        # Restore active open shift from local SQLite if exists
-        try:
-            session = init_db(f"sqlite:///{self.db_path}")
-            active_loc_shift = session.query(PosShift).filter_by(status='open').order_by(PosShift.id.desc()).first()
-            if active_loc_shift:
-                op_c = float(active_loc_shift.opening_cash or 0.0)
-                exp_c = float(active_loc_shift.expected_cash or op_c)
-                self.current_shift = {
-                    'id': active_loc_shift.server_id or active_loc_shift.id,
-                    'server_id': active_loc_shift.server_id,
-                    'local_id': active_loc_shift.id,
-                    'branch_id': active_loc_shift.branch_id,
-                    'cashier_id': active_loc_shift.cashier_id,
-                    'cashier_name': active_loc_shift.cashier_name,
-                    'opening_cash': op_c,
-                    'expected_cash': exp_c,
-                    'status': 'open'
-                }
-                if hasattr(self, 'shift_btn'):
-                    self.shift_btn.setText("ปิดกะ")
-                    self.shift_btn.setStyleSheet("QPushButton { background-color: #3b82f6; border: none; color: white; padding: 5px 10px; border-radius: 6px; font-weight: bold;} QPushButton:hover { background-color: #2563eb; }")
-                if hasattr(self, "branch_label"):
-                    self.branch_label.show()
-            session.close()
-        except Exception as e:
-            print(f"[POS] Error restoring local shift: {e}")
+        # Do not auto-open or auto-restore shifts on startup without cashier action
+        self.current_shift = None
+        if hasattr(self, 'shift_btn'):
+            self.shift_btn.setText("เปิดกะ")
+            self.shift_btn.setStyleSheet("QPushButton { background-color: #f59e0b; border: none; color: white; padding: 5px 10px; border-radius: 6px; font-weight: bold;} QPushButton:hover { background-color: #d97706; }")
+        if hasattr(self, "branch_label"):
+            self.branch_label.hide()
 
         self.start_sync()
 
@@ -2422,9 +2403,13 @@ class MainWindow(QMainWindow):
 
             self.logout_btn.hide()
 
+            self.current_shift = None
+            if hasattr(self, 'shift_btn'):
+                self.shift_btn.setText("เปิดกะ")
+                self.shift_btn.setStyleSheet("QPushButton { background-color: #f59e0b; border: none; color: white; padding: 5px 10px; border-radius: 6px; font-weight: bold;} QPushButton:hover { background-color: #d97706; }")
+            if hasattr(self, "branch_label"):
+                self.branch_label.hide()
             QMessageBox.information(self, "สำเร็จ", "ล็อกเอาท์เรียบร้อยแล้ว")
-
-        self.check_active_shift()
 
 
 
@@ -2670,8 +2655,77 @@ class MainWindow(QMainWindow):
                         QMessageBox.information(self, "สำเร็จ", "ปิดกะแบบออฟไลน์เรียบร้อย\n(ระบบจะส่งข้อมูลขึ้น ERP อัตโนมัติเมื่อออนไลน์)")
 
         else:
-
             # Open Shift
+            # 1. ตรวจสอบก่อนว่ามีกะที่เปิดค้างอยู่บน ERP หรือในเครื่องหรือไม่
+            existing_shift = None
+            try:
+                shift_params = {}
+                if self.config.get('branch_id'):
+                    shift_params['branch_id'] = self.config['branch_id']
+                if self.config.get('cashier_id'):
+                    shift_params['cashier_id'] = self.config['cashier_id']
+                s_res = requests.get(
+                    f"{self.config['api_url']}/api/pos/shift",
+                    headers=headers,
+                    params=shift_params,
+                    timeout=4
+                )
+                if s_res.status_code == 200:
+                    s_data = s_res.json().get('shift')
+                    if s_data and s_data.get('id'):
+                        existing_shift = dict(s_data)
+            except Exception:
+                pass
+
+            if not existing_shift:
+                try:
+                    session = init_db(f"sqlite:///{self.db_path}")
+                    loc_open = session.query(PosShift).filter_by(status='open').order_by(PosShift.id.desc()).first()
+                    if loc_open:
+                        op_c = float(loc_open.opening_cash or 0.0)
+                        exp_c = float(loc_open.expected_cash or op_c)
+                        existing_shift = {
+                            'id': loc_open.server_id or loc_open.id,
+                            'server_id': loc_open.server_id,
+                            'local_id': loc_open.id,
+                            'branch_id': loc_open.branch_id,
+                            'cashier_id': loc_open.cashier_id,
+                            'cashier_name': loc_open.cashier_name,
+                            'opening_cash': op_c,
+                            'expected_cash': exp_c,
+                            'status': 'open'
+                        }
+                    session.close()
+                except Exception:
+                    pass
+
+            if existing_shift:
+                shift_no = existing_shift.get('shift_no') or existing_shift.get('id') or '-'
+                op_cash = float(existing_shift.get('opening_cash') or 0.0)
+                msg = QMessageBox(self)
+                msg.setWindowTitle("พบกะเดิมที่ยังเปิดค้างอยู่")
+                msg.setIcon(QMessageBox.Question)
+                msg.setText(f"พบข้อมูลกะที่เปิดค้างอยู่ (กะเลขที่: {shift_no}, เงินเริ่มต้น: ฿{op_cash:,.2f})\n\nคุณต้องการทำงานต่อในกะเดิม หรือปิดกะเดิมก่อนเพื่อเปิดกะใหม่?")
+                btn_resume = msg.addButton("ทำงานต่อในกะเดิม", QMessageBox.AcceptRole)
+                btn_close_old = msg.addButton("ปิดกะเดิมก่อน", QMessageBox.DestructiveRole)
+                btn_cancel = msg.addButton("ยกเลิก", QMessageBox.RejectRole)
+                msg.exec()
+
+                if msg.clickedButton() == btn_resume:
+                    self.current_shift = existing_shift
+                    self.shift_btn.setText("ปิดกะ")
+                    self.shift_btn.setStyleSheet("QPushButton { background-color: #3b82f6; border: none; color: white; padding: 5px 10px; border-radius: 6px; font-weight: bold;} QPushButton:hover { background-color: #2563eb; }")
+                    if hasattr(self, "branch_label"): self.branch_label.show()
+                    QMessageBox.information(self, "สำเร็จ", f"เชื่อมต่อและเข้าทำงานต่อในกะ #{shift_no} เรียบร้อยแล้ว")
+                    return
+                elif msg.clickedButton() == btn_close_old:
+                    self.current_shift = existing_shift
+                    self.shift_btn.setText("ปิดกะ")
+                    self.shift_btn.setStyleSheet("QPushButton { background-color: #3b82f6; border: none; color: white; padding: 5px 10px; border-radius: 6px; font-weight: bold;} QPushButton:hover { background-color: #2563eb; }")
+                    self.toggle_shift()
+                    return
+                else:
+                    return
 
             from ui.shift_dialog import ShiftOpenDialog
 
@@ -2962,8 +3016,8 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
 
-            # Fetch and attach active ERP shift if open
-            if force_resume or not getattr(self, 'current_shift', None) or not self.current_shift.get('id'):
+            # Fetch and attach active ERP shift if open (only when explicitly requested)
+            if force_resume:
                 try:
                     shift_params = {}
                     if self.config.get('branch_id'):
@@ -4487,8 +4541,9 @@ class MainWindow(QMainWindow):
                 self.cart_table.setItem(row, 2, price_item)
                 self.cart_table.setItem(row, 3, total_item)
 
-                manage_widget = self._create_cart_row_manage_widget(row)
-                self.cart_table.setCellWidget(row, 4, manage_widget)
+                if hasattr(self, '_create_cart_row_manage_widget'):
+                    manage_widget = self._create_cart_row_manage_widget(row)
+                    self.cart_table.setCellWidget(row, 4, manage_widget)
 
             # Restore discount
             disc = float(sale.get('discount_amount') if isinstance(sale, dict) else (getattr(sale, 'discount_amount', 0.0) or 0.0))
@@ -4497,7 +4552,7 @@ class MainWindow(QMainWindow):
             self.discount_approved_by = self._resolve_discount_approver_id() if disc > 0 else None
 
             self.update_cart_total()
-            self._record_shift_activity('edited')
+            if hasattr(self, '_record_shift_activity'): self._record_shift_activity('edited')
             doc_no = sale.get('doc_number') if isinstance(sale, dict) else getattr(sale, 'doc_number', '')
             if hasattr(self, 'editing_banner'):
                 self.editing_banner.setText(f"กำลังแก้ไขบิลเดิม: {doc_no} (แก้ไขรายการแล้วกดชำระเงินเพื่อบันทึกบิลใหม่)")
@@ -4724,8 +4779,9 @@ class MainWindow(QMainWindow):
 
                 # Manage widget buttons
 
-                manage_widget = self._create_cart_row_manage_widget(row)
-                self.cart_table.setCellWidget(row, 4, manage_widget)
+                if hasattr(self, '_create_cart_row_manage_widget'):
+                    manage_widget = self._create_cart_row_manage_widget(row)
+                    self.cart_table.setCellWidget(row, 4, manage_widget)
 
                 
 
