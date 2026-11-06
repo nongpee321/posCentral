@@ -1,4 +1,4 @@
-﻿from PySide6.QtWidgets import (
+from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit, QFrame, QMessageBox, QWidget
 )
 from PySide6.QtCore import Qt
@@ -81,22 +81,22 @@ class ShiftOpenDialog(QDialog):
         
         # Opening Cash
         lbl1 = QLabel("เงินทอนตั้งต้น")
-        lbl1.setStyleSheet("font-weight: bold; font-size: 14px;")
+        lbl1.setStyleSheet("font-weight: bold; font-size: 14px; color: #0f172a;")
         layout.addWidget(lbl1)
         
         self.amount_input = QLineEdit()
         self.amount_input.setText("0")
-        self.amount_input.setStyleSheet("font-size: 16px; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px;")
+        self.amount_input.setStyleSheet("background-color: #ffffff; color: #0f172a; font-size: 16px; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px;")
         layout.addWidget(self.amount_input)
         
         # Note
         lbl2 = QLabel("หมายเหตุเปิดกะ")
-        lbl2.setStyleSheet("font-weight: bold; font-size: 14px;")
+        lbl2.setStyleSheet("font-weight: bold; font-size: 14px; color: #0f172a;")
         layout.addWidget(lbl2)
         
         self.note_input = QLineEdit()
         self.note_input.setPlaceholderText("ไม่บังคับ")
-        self.note_input.setStyleSheet("font-size: 16px; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px;")
+        self.note_input.setStyleSheet("background-color: #ffffff; color: #0f172a; font-size: 16px; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px;")
         layout.addWidget(self.note_input)
         
         main_layout.addWidget(content)
@@ -137,14 +137,27 @@ class ShiftCloseDialog(QDialog):
         super().__init__(parent)
         self.setObjectName("ShiftCloseDialog")
         self.setWindowTitle("ปิดกะ (Close Shift)")
-        self.setFixedSize(400, 300)
+        self.setFixedSize(420, 320)
         self.setStyleSheet("""
             #ShiftCloseDialog {
-                background-color: white;
-                color: #111827;
+                background-color: #ffffff;
+                color: #0f172a;
+                font-family: 'Segoe UI', Tahoma, sans-serif;
             }
             QLabel {
-                color: #111827;
+                color: #0f172a;
+            }
+            QLineEdit {
+                background-color: #ffffff;
+                color: #0f172a;
+                border: 2px solid #cbd5e1;
+                border-radius: 8px;
+                padding: 8px 12px;
+                font-size: 22px;
+                font-weight: bold;
+            }
+            QLineEdit:focus {
+                border-color: #0284c7;
             }
             QMessageBox {
                 background-color: #ffffff;
@@ -160,40 +173,66 @@ class ShiftCloseDialog(QDialog):
         
     def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(20)
+        layout.setContentsMargins(30, 25, 30, 25)
+        layout.setSpacing(18)
         
         title = QLabel("ปิดกะทำงาน")
-        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #111827;")
+        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #0f172a;")
         layout.addWidget(title, alignment=Qt.AlignCenter)
         
         info = QLabel(f"ยอดเงินในระบบ: ฿ {self.expected_cash:,.2f}")
-        info.setStyleSheet("font-size: 16px; color: #4b5563; font-weight: bold;")
+        info.setStyleSheet("font-size: 16px; color: #0369a1; background-color: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 8px 16px; font-weight: bold;")
         layout.addWidget(info, alignment=Qt.AlignCenter)
         
         input_layout = QHBoxLayout()
+        input_layout.setSpacing(12)
         lbl = QLabel("ยอดเงินนับจริง:")
-        lbl.setStyleSheet("font-size: 16px; color: #374151;")
+        lbl.setStyleSheet("font-size: 16px; color: #1e293b; font-weight: bold;")
         
         self.amount_input = QLineEdit()
-        if self.expected_cash > 0:
-            self.amount_input.setText(f"{self.expected_cash:.2f}")
-            self.amount_input.selectAll()
-        else:
-            self.amount_input.setPlaceholderText("0.00")
-        self.amount_input.setStyleSheet("font-size: 20px; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px;")
+        self.amount_input.setText("0.00")
+        self.amount_input.setAlignment(Qt.AlignCenter)
+        self.amount_input.setStyleSheet("background-color: #ffffff; color: #0f172a; font-size: 22px; font-weight: bold; padding: 8px 12px; border: 2px solid #cbd5e1; border-radius: 8px;")
+        self.amount_input.selectAll()
         
         input_layout.addWidget(lbl)
         input_layout.addWidget(self.amount_input)
         layout.addLayout(input_layout)
         
         btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
         cancel_btn = QPushButton("ยกเลิก")
-        cancel_btn.setStyleSheet("background-color: white; border: 1px solid #d1d5db; padding: 10px; border-radius: 8px; font-size: 16px; font-weight: bold;")
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f8fafc;
+                color: #334155;
+                border: 1px solid #cbd5e1;
+                padding: 10px 20px;
+                border-radius: 8px;
+                font-size: 15px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #e2e8f0;
+            }
+        """)
         cancel_btn.clicked.connect(self.reject)
         
         confirm_btn = QPushButton("ยืนยันปิดกะ")
-        confirm_btn.setStyleSheet("background-color: #ef4444; color: white; border: none; padding: 10px; border-radius: 8px; font-size: 16px; font-weight: bold;")
+        confirm_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ef4444;
+                color: #ffffff;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 8px;
+                font-size: 15px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #dc2626;
+            }
+        """)
         confirm_btn.clicked.connect(self.on_confirm)
         
         btn_layout.addWidget(cancel_btn)
