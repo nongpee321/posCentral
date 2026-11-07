@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
 
 from PySide6.QtCore import Qt, QTimer
 
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QFont
 
 import requests
 
@@ -94,7 +94,7 @@ class MainWindow(QMainWindow):
 
         import sys
 
-        from PySide6.QtGui import QIcon
+        from PySide6.QtGui import QIcon, QFont
 
         if getattr(sys, 'frozen', False):
 
@@ -1147,6 +1147,91 @@ class MainWindow(QMainWindow):
             self._update_search_suggestions(clean_text)
             self.render_products_grid(search_query=clean_text)
 
+    @staticmethod
+    def _create_suggestion_product_widget(name, unit_str, barcode_str, price_val, is_promo=False):
+        container = QWidget()
+        container.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        container.setStyleSheet("background: transparent;")
+
+        h_layout = QHBoxLayout(container)
+        h_layout.setContentsMargins(12, 6, 12, 6)
+        h_layout.setSpacing(10)
+
+        v_left = QVBoxLayout()
+        v_left.setSpacing(2)
+
+        lbl_name = QLabel(name)
+        lbl_name.setFont(QFont("Tahoma", 12, QFont.Bold))
+        lbl_name.setStyleSheet("color: #0f172a; background: transparent;")
+        lbl_name.setWordWrap(True)
+        lbl_name.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        v_left.addWidget(lbl_name)
+
+        sub_parts = []
+        if unit_str:
+            sub_parts.append(unit_str)
+        if barcode_str:
+            sub_parts.append(f"บาร์โค้ด: {barcode_str}")
+        sub_text = "  •  ".join(sub_parts)
+        lbl_sub = QLabel(sub_text)
+        lbl_sub.setFont(QFont("Tahoma", 10))
+        lbl_sub.setStyleSheet("color: #64748b; background: transparent;")
+        lbl_sub.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        v_left.addWidget(lbl_sub)
+
+        h_layout.addLayout(v_left, 1)
+
+        v_right = QVBoxLayout()
+        v_right.setSpacing(2)
+        v_right.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        lbl_price = QLabel(f"฿{price_val:,.2f}")
+        lbl_price.setFont(QFont("Tahoma", 13, QFont.Bold))
+        lbl_price.setStyleSheet("color: #0284c7; background: transparent;")
+        lbl_price.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        v_right.addWidget(lbl_price)
+
+        if is_promo:
+            lbl_promo = QLabel("ลดพิเศษ")
+            lbl_promo.setFont(QFont("Tahoma", 9, QFont.Bold))
+            lbl_promo.setStyleSheet("color: #dc2626; background: #fee2e2; border-radius: 3px; padding: 1px 4px;")
+            lbl_promo.setAlignment(Qt.AlignCenter)
+            lbl_promo.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            v_right.addWidget(lbl_promo)
+
+        h_layout.addLayout(v_right)
+        return container
+
+    @staticmethod
+    def _create_suggestion_category_widget(cat_name):
+        container = QWidget()
+        container.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        container.setStyleSheet("background: transparent;")
+        h_layout = QHBoxLayout(container)
+        h_layout.setContentsMargins(12, 6, 12, 6)
+
+        v = QVBoxLayout()
+        v.setSpacing(2)
+        lbl = QLabel(f"หมวดหมู่: {cat_name}")
+        lbl.setFont(QFont("Tahoma", 12, QFont.Bold))
+        lbl.setStyleSheet("color: #d97706; background: transparent;")
+        lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        v.addWidget(lbl)
+
+        lbl_sub = QLabel("กดเพื่อเลือกดูหมวดหมู่นี้")
+        lbl_sub.setFont(QFont("Tahoma", 10))
+        lbl_sub.setStyleSheet("color: #94a3b8; background: transparent;")
+        lbl_sub.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        v.addWidget(lbl_sub)
+        h_layout.addLayout(v, 1)
+
+        tag = QLabel("หมวดหมู่")
+        tag.setFont(QFont("Tahoma", 10, QFont.Bold))
+        tag.setStyleSheet("color: #b45309; background: #fef3c7; border-radius: 4px; padding: 2px 6px;")
+        tag.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        h_layout.addWidget(tag, 0, Qt.AlignRight | Qt.AlignVCenter)
+        return container
+
     def _update_search_suggestions(self, clean_text):
         if not hasattr(self, 'suggestions_list'):
             return
@@ -1185,16 +1270,18 @@ class MainWindow(QMainWindow):
                     self.suggestions_list.hide()
                     return
 
-            from PySide6.QtGui import QFont
             for cat in category_matches:
-                item = QListWidgetItem(f"หมวดหมู่: {cat.name_th}")
-                item.setFont(QFont("Tahoma", 13, QFont.Bold))
+                item = QListWidgetItem()
+                item.setText(f"หมวดหมู่: {cat.name_th}")
                 item.setData(Qt.UserRole, {'category_id': cat.id, 'category_name': cat.name_th})
+                w_cat = MainWindow._create_suggestion_category_widget(cat.name_th)
+                item.setSizeHint(w_cat.sizeHint())
                 self.suggestions_list.addItem(item)
+                self.suggestions_list.setItemWidget(item, w_cat)
+
             for p in matches:
                 price = float(p.pos_price if p.pos_price is not None and p.pos_price > 0 else (p.default_price or 0.0))
                 is_promo = bool(getattr(p, 'is_promotion', False))
-                promo_tag = " [\u0e25\u0e14\u0e1e\u0e34\u0e40\u0e28\u0e29]" if is_promo else ""
                 p_dict = {
                     'id': p.id, 'sku_code': str(p.sku_code), 'name_th': str(p.name_th),
                     'default_price': float(p.default_price or 0.0),
@@ -1215,14 +1302,26 @@ class MainWindow(QMainWindow):
                 if not unit_rows:
                     unit_rows = [('\u0e2b\u0e19\u0e48\u0e27\u0e22\u0e2b\u0e25\u0e31\u0e01', str(p.barcode or p.sku_code or ''), 1.0)]
                 for unit, code, factor in unit_rows:
-                    item = QListWidgetItem(f"{p.name_th} — {unit} (x{factor:g}) [{code}]  ฿{price:,.2f}{promo_tag}")
-                    item.setFont(QFont("Tahoma", 13, QFont.Bold))
+                    item = QListWidgetItem()
+                    item.setText(f"{p.name_th} {code}")
                     item_dict = dict(p_dict)
                     item_dict.update({'unit_name': unit, 'unit_factor': factor, 'selected_barcode': code})
                     item.setData(Qt.UserRole, item_dict)
-                    self.suggestions_list.addItem(item)
 
-            self.suggestions_list.setFixedHeight(min(300, max(46, self.suggestions_list.count() * 38 + 6)))
+                    unit_label = f"{unit} (x{factor:g})" if unit else ""
+                    w_prod = MainWindow._create_suggestion_product_widget(
+                        name=p.name_th,
+                        unit_str=unit_label,
+                        barcode_str=code,
+                        price_val=price,
+                        is_promo=is_promo
+                    )
+                    item.setSizeHint(w_prod.sizeHint())
+                    self.suggestions_list.addItem(item)
+                    self.suggestions_list.setItemWidget(item, w_prod)
+
+            item_count = self.suggestions_list.count()
+            self.suggestions_list.setFixedHeight(min(360, max(52, item_count * 54 + 6)))
             self.suggestions_list.show()
         except Exception:
             pass
@@ -3560,22 +3659,35 @@ class MainWindow(QMainWindow):
 
         # Autocomplete suggestions list
         self.suggestions_list = QListWidget()
+        self.suggestions_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.suggestions_list.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.suggestions_list.setStyleSheet("""
             QListWidget {
                 background-color: #ffffff;
                 border: 2px solid #0284c7;
-                border-radius: 6px;
-                font-size: 14px;
-                color: #0f172a;
+                border-radius: 8px;
             }
             QListWidget::item {
-                padding: 10px 14px;
                 border-bottom: 1px solid #f1f5f9;
+                background-color: #ffffff;
             }
-            QListWidget::item:hover, QListWidget::item:selected {
+            QListWidget::item:hover {
+                background-color: #f0f9ff;
+            }
+            QListWidget::item:selected {
                 background-color: #e0f2fe;
-                color: #0369a1;
-                font-weight: bold;
+            }
+            QScrollBar:vertical {
+                width: 6px;
+                background: #f1f5f9;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:vertical {
+                background: #cbd5e1;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #94a3b8;
             }
         """)
         self.suggestions_list.hide()
