@@ -4837,8 +4837,9 @@ class MainWindow(QMainWindow):
 
             self.discount_label = str(_disc_src.get('discount_label') or "")
 
-            held_ref = chosen.get('hold_no') or chosen.get('label') or chosen.get('note') or ''
-            self._active_held_code = str(held_ref).strip() if held_ref else None
+            held_ref = chosen.get('label') or chosen.get('note') or chosen.get('hold_no') or ''
+            from ui.receipt_dialog import _format_held_code
+            self._active_held_code = _format_held_code(held_ref)
             if hasattr(self, 'editing_banner') and self._active_held_code:
                 self.editing_banner.setText(f"รายการจากบิลพักคิว: {self._active_held_code} (จะออกเลขที่ใบเสร็จทางการเมื่อชำระเงิน)")
                 self.editing_banner.setVisible(True)

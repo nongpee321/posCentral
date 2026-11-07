@@ -51,6 +51,22 @@ def _format_receipt_qty(qty_value):
     first_dec = (qty_dec * Decimal('10')).to_integral_value(rounding=ROUND_FLOOR) / Decimal('10')
     return f"{first_dec:.1f} **"
 
+def _format_held_code(val):
+    if not val:
+        return ""
+    import re
+    s = str(val).strip()
+    if '-' in s:
+        parts = s.split('-')
+        if parts[-1].isdigit():
+            return parts[-1]
+    if len(s) > 8:
+        match = re.search(r'\d+$', s)
+        if match:
+            return match.group(0)[-4:]
+        return s[:8]
+    return s
+
 def _format_total_qty(qty_value):
     qty_dec = _receipt_amount(qty_value).quantize(Decimal('0.001')).normalize()
     if qty_dec == int(qty_dec):
@@ -302,7 +318,7 @@ def print_escpos_receipt(printer_name, receipt_data, config):
         cmds += enc("-" * 48) + LINE_FEED
         
     cmds += enc(f"สาขา: {branch}    แคชเชียร์: {cashier}") + LINE_FEED
-    held_code = receipt_data.get('held_code')
+    held_code = _format_held_code(receipt_data.get('held_code'))
     held_str = f" (พักบิล: {held_code})" if held_code else ""
     cmds += enc(f"เลขที่บิล: {receipt_no}{held_str}") + LINE_FEED
     cmds += ALIGN_RIGHT
@@ -873,7 +889,7 @@ class ReceiptDialog(QDialog):
         branch = self.receipt_data.get('branch', 'สำนักงานใหญ่')
         cashier = self.receipt_data.get('cashier', '01')
         receipt_no = self.receipt_data.get('doc_number', '-')
-        held_code = self.receipt_data.get('held_code')
+        held_code = _format_held_code(self.receipt_data.get('held_code'))
         held_badge = f" <span style='font-size: {font_meta}; color: #334155; font-weight: normal;'>(พักบิล: {safe(held_code)})</span>" if held_code else ""
         date_str = self.receipt_data.get('date', '-')
 
@@ -1020,7 +1036,9 @@ class ReceiptDialog(QDialog):
                             <td colspan="4">Cashier : &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; {safe(cashier)}</td>
                         </tr>
                         <tr>
-                            <td colspan="4" style="font-size: {font_meta}; padding-top: 2px; white-space: nowrap;">เลขที่บิล: {safe(receipt_no)}{held_badge} &nbsp; {safe(_receipt_date_label(date_str))}</td>
+                            <td colspan="4" style="font-size: {font_meta}; padding-top: 2px;">
+                                {f'<div>เลขที่บิล: {safe(receipt_no)}{held_badge}</div><div style="padding-top: 1px;">{safe(_receipt_date_label(date_str))}</div>' if held_code else f'<span style="white-space: nowrap;">เลขที่บิล: {safe(receipt_no)} &nbsp; {safe(_receipt_date_label(date_str))}</span>'}
+                            </td>
                         </tr>
                     </tbody>
                 </table>
