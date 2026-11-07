@@ -435,8 +435,16 @@ class MainWindow(QMainWindow):
                     config = json.load(f)
 
                 if not config.get('receipt_paper_size_v110_user_set'):
-
                     config['receipt_paper_size'] = '80mm'
+
+                if not config.get('receipt_printer'):
+                    try:
+                        from ui.receipt_dialog import get_configured_printer_name
+                        detected = get_configured_printer_name(config)
+                        if detected:
+                            config['receipt_printer'] = detected
+                    except Exception:
+                        pass
 
                 return config
 
@@ -3461,8 +3469,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "แจ้งเตือน", "ระบบซิงค์ยังไม่พร้อมทำงาน")
 
     def manual_open_drawer(self):
-
-        printer_name = self.config.get('receipt_printer', '')
+        from ui.receipt_dialog import get_configured_printer_name
+        printer_name = get_configured_printer_name(self.config)
+        if printer_name and not self.config.get('receipt_printer'):
+            self.config['receipt_printer'] = printer_name
+            self.save_config()
 
         if not printer_name:
 

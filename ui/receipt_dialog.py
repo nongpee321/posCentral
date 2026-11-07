@@ -435,12 +435,35 @@ def get_drawer_kick_commands():
     cmds += b'\x07'                       # BEL (Star / generic pulse)
     return bytes(cmds)
 
-def open_cash_drawer(printer_name):
+def get_configured_printer_name(config=None):
+    if isinstance(config, dict):
+        p = (config.get('receipt_printer') or '').strip()
+        if p and p != "--- กรุณาเลือกเครื่องพิมพ์ ---":
+            return p
+    try:
+        import win32print
+        available = [p[2] for p in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)]
+        keywords = ['xp-80', 'xp80', 'pos', 'thermal', 'receipt', '80mm', '58mm', 'xprinter', 'epson', 'bixolon', 'citizen']
+        for prn in available:
+            if any(k in prn.lower() for k in keywords):
+                return prn
+        def_p = win32print.GetDefaultPrinter()
+        if def_p:
+            return def_p
+        if available:
+            return available[0]
+    except Exception:
+        pass
+    return ""
+
+def open_cash_drawer(printer_name=None):
     try:
         import win32print
     except ImportError:
         raise Exception("Cannot import win32print")
 
+    if not printer_name:
+        printer_name = get_configured_printer_name()
     if not printer_name:
         raise Exception("No printer configured")
 
@@ -542,7 +565,7 @@ class ReceiptSettingsDialog(QDialog):
         for printer in QPrinterInfo.availablePrinters():
             self.printer_combo.addItem(printer.printerName())
 
-        current_printer = self.config.get('receipt_printer', '')
+        current_printer = get_configured_printer_name(self.config)
         if current_printer:
             idx = self.printer_combo.findText(current_printer)
             if idx >= 0:
@@ -776,7 +799,7 @@ class ReceiptDialog(QDialog):
 
         if pm in ['cash', 'split', 'เงินสด', 'ผสม (Split)']:
 
-            printer_name = self.config.get('receipt_printer', '')
+            printer_name = get_configured_printer_name(self.config)
 
             if printer_name:
 
@@ -1063,37 +1086,28 @@ class ReceiptDialog(QDialog):
         self.adjustSize()
 
     def manual_open_drawer(self):
-
         parent_window = self.parent()
-
         config = getattr(parent_window, 'config', {}) if parent_window else {}
+        merged_config = dict(config)
+        merged_config.update(self.config)
 
-        printer_name = config.get('receipt_printer', '')
-
+        printer_name = get_configured_printer_name(merged_config)
         if not printer_name:
-
             QMessageBox.warning(self, "แจ้งเตือน", "ยังไม่ได้ตั้งค่าเครื่องพิมพ์ในหน้าตั้งค่า")
-
             return
 
-        # Require PIN to open drawer
-        from ui.drawer_pin_dialog import DrawerPinDialog
-        pin_dialog = DrawerPinDialog(
-            self,
-            api_url=config.get('api_url', ''),
-            pos_token=config.get('pos_token', ''),
-            cashier_code=config.get('cashier_code') or config.get('cashier_username', ''),
-            offline_auth=config.get('offline_auth'),
-            active_pin=getattr(parent_window, '_active_cashier_pin', '') if parent_window else ''
-        )
-        if pin_dialog.exec() != QDialog.Accepted:
-            return
+        if not merged_config.get('receipt_printer'):
+            self.config['receipt_printer'] = printer_name
+            if parent_window and hasattr(parent_window, 'config'):
+                parent_window.config['receipt_printer'] = printer_name
+                if hasattr(parent_window, 'save_config'):
+                    parent_window.save_config()
 
         try:
             open_cash_drawer(printer_name)
             QMessageBox.information(self, "สำเร็จ", f"ส่งคำสั่งเปิดลิ้นชักไปยังเครื่องพิมพ์ '{printer_name}' เรียบร้อยแล้ว")
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"ไม่สามารถเปิดลิ้นชักได้:\n{str(e)}")
+            QMessageBox.critical(self, "ข้อผิดพลาด", f"ไม่สามารถเปิดลิ้นชักได้:\n{str(e)}")
 
     def print_receipt(self):
         parent_window = self.parent()
@@ -1101,10 +1115,17 @@ class ReceiptDialog(QDialog):
         merged_config = dict(config)
         merged_config.update(self.config)
 
-        printer_name = merged_config.get('receipt_printer', '')
+        printer_name = get_configured_printer_name(merged_config)
         if not printer_name:
             QMessageBox.warning(self, "แจ้งเตือน", "กรุณาตั้งค่าเครื่องพิมพ์ใบเสร็จ (ปุ่มตั้งค่า) ก่อน!")
             return
+
+        if not merged_config.get('receipt_printer'):
+            self.config['receipt_printer'] = printer_name
+            if parent_window and hasattr(parent_window, 'config'):
+                parent_window.config['receipt_printer'] = printer_name
+                if hasattr(parent_window, 'save_config'):
+                    parent_window.save_config()
 
         try:
             print_escpos_receipt(
