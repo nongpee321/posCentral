@@ -66,7 +66,7 @@ def test_receipt_dialog_matches_reference_slip(qtbot):
 
 def test_version_string_and_receipt_jumbo_sizing(qtbot):
     from ui.token_dialog import VERSION_STRING
-    assert VERSION_STRING == "1.1.9"
+    assert VERSION_STRING == "1.1.10"
 
     dlg = ReceiptDialog(None, {
         "doc_number": "POS-0001-20260417100516-247",
@@ -110,3 +110,20 @@ def test_receipt_settings_dialog_copies_and_printer(qtbot, monkeypatch):
 
     assert dlg.config['receipt_copies'] == 3
 
+
+
+def test_receipt_held_code_display(qtbot):
+    receipt_data = {
+        "doc_number": "001201254930",
+        "held_code": "0237",
+        "date": "2026-11-07 09:58:00",
+        "total": 320.00,
+        "items": [
+            {"name": "เห็ดหิมะ", "qty": 1, "price": 15.00, "total": 15.00},
+        ],
+    }
+    dlg = ReceiptDialog(None, receipt_data)
+    qtbot.addWidget(dlg)
+    plain = dlg.receipt_text.toPlainText()
+    assert "001201254930" in plain
+    assert "พักบิล: 0237" in plain

@@ -72,6 +72,8 @@ class MainWindow(QMainWindow):
 
         self.customer_display = None
 
+        self._active_held_code = None
+
         self.discount_amount = 0.0
 
         self.discount_label = ""
@@ -1924,6 +1926,7 @@ class MainWindow(QMainWindow):
                 self.discount_label = ""
                 self.promo_discount_amount = 0.0
                 self.promo_discount_details = []
+                self._active_held_code = None
             else:
                 try:
                     from services.promotion_engine import evaluate_promotions
@@ -4503,7 +4506,16 @@ class MainWindow(QMainWindow):
 
         self._record_shift_activity('held')
 
-        QMessageBox.information(self, "พักบิลสำเร็จ", f"รหัสพักบิล: {hold_code}\nแจ้งรหัสนี้ให้ลูกค้าเพื่อใช้เรียกบิลกลับ\n\nสามารถเปิดการขายให้ลูกค้ารายต่อไปได้ทันที")
+        self._active_held_code = None
+
+        QMessageBox.information(
+            self,
+            "พักบิลสำเร็จ",
+            f"รหัสคิวพักบิล: {hold_code}\n\n"
+            f"แจ้งรหัสคิวนี้ให้ลูกค้าเพื่อใช้เรียกบิลกลับมาคิดเงิน\n"
+            f"(เมื่อชำระเงิน ระบบจะออกเลขที่ใบเสร็จทางการให้อัตโนมัติ)\n\n"
+            f"สามารถเปิดการขายให้ลูกค้ารายต่อไปได้ทันที"
+        )
 
 
 
@@ -4520,6 +4532,7 @@ class MainWindow(QMainWindow):
 
     def load_bill_into_cart(self, sale):
         try:
+            self._active_held_code = None
             self.cart_table.setRowCount(0)
             items = sale.get('items', []) if isinstance(sale, dict) else [
                 {
@@ -4824,6 +4837,12 @@ class MainWindow(QMainWindow):
 
             self.discount_label = str(_disc_src.get('discount_label') or "")
 
+            held_ref = chosen.get('hold_no') or chosen.get('label') or chosen.get('note') or ''
+            self._active_held_code = str(held_ref).strip() if held_ref else None
+            if hasattr(self, 'editing_banner') and self._active_held_code:
+                self.editing_banner.setText(f"รายการจากบิลพักคิว: {self._active_held_code} (จะออกเลขที่ใบเสร็จทางการเมื่อชำระเงิน)")
+                self.editing_banner.setVisible(True)
+
             self.update_cart_total()
 
             
@@ -4990,6 +5009,7 @@ class MainWindow(QMainWindow):
 
             
 
+            self._active_held_code = None
             self.cart_table.setRowCount(0)
             if hasattr(self, 'editing_banner'):
                 self.editing_banner.setVisible(False)
@@ -5528,6 +5548,9 @@ class MainWindow(QMainWindow):
             promo_details_for_receipt = list(getattr(self, 'promo_discount_details', []))
             promo_name_for_receipt = ", ".join(d.get('label') or d.get('name') for d in promo_details_for_receipt if d.get('label') or d.get('name')) if promo_details_for_receipt else ""
 
+            active_held_code = getattr(self, '_active_held_code', None)
+            self._active_held_code = None
+
             self.discount_amount = 0.0
 
             self.discount_label = ""
@@ -5565,6 +5588,8 @@ class MainWindow(QMainWindow):
             receipt_data = {
 
                 'doc_number': doc_no,
+
+                'held_code': active_held_code,
 
                 'subtotal': round(total_amount, 2),
 
