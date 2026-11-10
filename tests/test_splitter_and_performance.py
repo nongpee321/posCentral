@@ -110,3 +110,48 @@ def test_dynamic_grid_columns(qapp, mock_db):
         win._rearrange_product_grid()
     finally:
         win.close()
+
+
+def test_add_to_cart_uses_in_memory_stock(qapp, mock_db):
+    win = MainWindow(db_path=mock_db, is_offline_login=True)
+    win.current_shift = {'id': 999, 'local_id': 1}
+    try:
+        from unittest.mock import patch, MagicMock
+        product = {
+            'id': 1,
+            'sku_code': 'SKU-001',
+            'name_th': 'สินค้าทดสอบ 1',
+            'default_price': 51.0,
+            'pos_price': 51.0,
+            'stock_qty': 88.0,
+            'is_scale_item': False,
+        }
+        # When stock_qty is provided, add_to_cart does not query Product table
+        with patch('database.models.init_db') as mock_db_init:
+            mock_session = MagicMock()
+            mock_db_init.return_value = mock_session
+            win.add_to_cart(product, qty=1.0)
+            # Ensure Product table was not queried in add_to_cart
+            for call_obj in mock_session.query.call_args_list:
+                assert call_obj[0][0] != Product, "Product table should not be queried when stock_qty is in memory"
+        assert win.cart_table.rowCount() == 1
+    finally:
+        win.close()
+
+
+def test_sync_worker_reuses_ping_catalog_version():
+    from unittest.mock import patch, MagicMock
+    from sync_worker import SyncWorker
+    worker = SyncWorker(api_url="https://test.pos", pos_token="token", db_path=":memory:")
+
+    # Case 1: _last_ping_data was populated during _check_internet
+    worker._last_ping_data = {"status": "ok", "catalog_version": 105}
+    worker._last_catalog_version = 100
+
+    with patch('requests.get') as mock_get:
+        changed = worker._check_catalog_version()
+        # Should NOT make an extra HTTP request
+        mock_get.assert_not_called()
+        assert changed is True
+        assert worker._last_catalog_version == 105
+        assert worker._last_ping_data is None

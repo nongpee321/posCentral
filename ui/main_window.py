@@ -1147,13 +1147,14 @@ class MainWindow(QMainWindow):
             self._search_debounce_timer.timeout.connect(self._do_debounced_search)
 
         self._pending_search_text = clean_text
-        self._search_debounce_timer.start(200)
+        self._search_debounce_timer.start(250)
 
     def _do_debounced_search(self):
         clean_text = getattr(self, '_pending_search_text', '')
         if clean_text:
             self._update_search_suggestions(clean_text)
-            self.render_products_grid(search_query=clean_text)
+            if not getattr(self, 'suggestions_list', None) or not self.suggestions_list.isVisible():
+                self.render_products_grid(search_query=clean_text)
 
     @staticmethod
     def _create_suggestion_product_widget(name, unit_str, barcode_str, price_val, is_promo=False):
@@ -1272,9 +1273,11 @@ class MainWindow(QMainWindow):
                 Category.name_th.like(sq)
             ).order_by(Category.name_th).limit(6).all()
 
+            self.suggestions_list.setUpdatesEnabled(False)
             self.suggestions_list.clear()
             if not matches:
                 if not category_matches:
+                    self.suggestions_list.setUpdatesEnabled(True)
                     self.suggestions_list.hide()
                     return
 
@@ -1287,6 +1290,13 @@ class MainWindow(QMainWindow):
                 self.suggestions_list.addItem(item)
                 self.suggestions_list.setItemWidget(item, w_cat)
 
+            matched_pids = [p.id for p in matches]
+            barcodes_by_pid = {}
+            if matched_pids:
+                all_bcs = session.query(ProductBarcode).filter(ProductBarcode.product_id.in_(matched_pids)).order_by(ProductBarcode.id).all()
+                for bc in all_bcs:
+                    barcodes_by_pid.setdefault(bc.product_id, []).append(bc)
+
             for p in matches:
                 price = float(p.pos_price if p.pos_price is not None and p.pos_price > 0 else (p.default_price or 0.0))
                 is_promo = bool(getattr(p, 'is_promotion', False))
@@ -1297,7 +1307,7 @@ class MainWindow(QMainWindow):
                     'is_promotion': is_promo, 'is_scale_item': bool(p.is_scale_item),
                     'stock_qty': float(p.stock_qty) if p.stock_qty is not None else 999999,
                 }
-                units = session.query(ProductBarcode).filter(ProductBarcode.product_id == p.id).order_by(ProductBarcode.id).all()
+                units = barcodes_by_pid.get(p.id, [])
                 unit_rows, seen = [], set()
                 for bc in units:
                     code = str(bc.barcode or '').strip()
@@ -1330,10 +1340,13 @@ class MainWindow(QMainWindow):
 
             item_count = self.suggestions_list.count()
             self.suggestions_list.setFixedHeight(min(360, max(52, item_count * 54 + 6)))
+            self.suggestions_list.setUpdatesEnabled(True)
             self.suggestions_list.show()
         except Exception:
             pass
         finally:
+            if hasattr(self, 'suggestions_list'):
+                self.suggestions_list.setUpdatesEnabled(True)
             if session:
                 session.close()
 
@@ -1708,13 +1721,23 @@ class MainWindow(QMainWindow):
 
             
 
-        session = init_db(f'sqlite:///{self.db_path}')
+        prod_id = product.get('id') if isinstance(product, dict) else getattr(product, 'id', None)
 
-        db_product = session.query(Product).filter_by(id=product.get('id') if isinstance(product, dict) else getattr(product, 'id')).first()
+        stock_qty = product.get('stock_qty') if isinstance(product, dict) else getattr(product, 'stock_qty', None)
 
-        stock_qty = db_product.stock_qty if db_product and db_product.stock_qty is not None else 999999
+        if stock_qty is None:
 
-        session.close()
+            session = init_db(f'sqlite:///{self.db_path}')
+
+            try:
+
+                db_product = session.query(Product).filter_by(id=prod_id).first()
+
+                stock_qty = db_product.stock_qty if db_product and db_product.stock_qty is not None else 999999
+
+            finally:
+
+                session.close()
 
 
 

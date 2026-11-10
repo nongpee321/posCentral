@@ -198,6 +198,12 @@ class SyncWorker(QThread):
 
                 self._consecutive_offline_count = 0
 
+                if r.status_code == 200:
+                    try:
+                        self._last_ping_data = r.json()
+                    except Exception:
+                        self._last_ping_data = None
+
                 return True
 
         except Exception:
@@ -275,37 +281,42 @@ class SyncWorker(QThread):
 
         """
 
-        headers = {
+        data = getattr(self, '_last_ping_data', None)
+        self._last_ping_data = None
 
-            'Authorization': f'Bearer {self.pos_token}',
+        if not data:
+            headers = {
 
-            'Accept': 'application/json'
+                'Authorization': f'Bearer {self.pos_token}',
 
-        }
+                'Accept': 'application/json'
 
-        try:
+            }
 
-            resp = requests.get(f'{self.api_url}/api/pos/ping', headers=headers, timeout=6)
+            try:
 
-            if resp.status_code == 200:
+                resp = requests.get(f'{self.api_url}/api/pos/ping', headers=headers, timeout=6)
 
-                data = resp.json()
+                if resp.status_code == 200:
 
-                server_ver = data.get('catalog_version', 0)
+                    data = resp.json()
 
-                last_ver = getattr(self, '_last_catalog_version', None)
+            except Exception:
 
-                if last_ver is not None and server_ver != last_ver:
+                pass
 
-                    self._last_catalog_version = server_ver
+        if data:
+            server_ver = data.get('catalog_version', 0)
 
-                    return True
+            last_ver = getattr(self, '_last_catalog_version', None)
+
+            if last_ver is not None and server_ver != last_ver:
 
                 self._last_catalog_version = server_ver
 
-        except Exception:
+                return True
 
-            pass
+            self._last_catalog_version = server_ver
 
         return False
 
@@ -400,13 +411,15 @@ class SyncWorker(QThread):
 
                     version_changed = self._check_catalog_version()
 
-                    # Poll the catalog every ~30 seconds as a fallback even when
-                    # the backend did not bump catalog_version. This keeps POS
-                    # prices, units, stock and promotions fresh automatically.
+                    # Poll the catalog every ~30 minutes as a fallback when
+                    # backend does not bump catalog_version. Immediate sync runs
+                    # when catalog_version changes or manual sync is requested.
 
                     is_initial_run = getattr(self, '_last_catalog_version', None) is None
 
-                    if is_initial_run or version_changed or manual_sync or (loop_count % 3 == 0):
+                    changed = False
+
+                    if is_initial_run or version_changed or manual_sync or (loop_count % 180 == 0):
 
                         changed = self._sync_products()
 
@@ -544,6 +557,9 @@ class SyncWorker(QThread):
 
             session.query(ProductBarcode).filter(ProductBarcode.product_id > 0).delete(synchronize_session=False)
 
+            barcode_rows = []
+            product_rows = []
+
             for prod_data in products_data:
 
                 barcode_val = ''
@@ -606,48 +622,37 @@ class SyncWorker(QThread):
                     except (TypeError, ValueError):
                         bc_price = None
 
-                    session.add(ProductBarcode(
-                        product_id=prod_data['id'],
-                        barcode=code,
-                        barcode_norm=(code.lstrip('0') or '0'),
-                        barcode_type=bc_item.get('barcode_type'),
-                        unit_id=bc_item.get('unit_id'),
-                        unit_name=bc_item.get('unit_name'),
-                        unit_factor=unit_factor,
-                        price=bc_price,
-                    ))
+                    barcode_rows.append({
+                        'product_id': prod_data['id'],
+                        'barcode': code,
+                        'barcode_norm': (code.lstrip('0') or '0'),
+                        'barcode_type': bc_item.get('barcode_type'),
+                        'unit_id': bc_item.get('unit_id'),
+                        'unit_name': bc_item.get('unit_name'),
+                        'unit_factor': unit_factor,
+                        'price': bc_price,
+                    })
 
-                prod = Product(
+                product_rows.append({
+                    'id': prod_data['id'],
+                    'sku_code': str(prod_data['sku_code']),
+                    'name_th': prod_data['name_th'],
+                    'name_en': prod_data.get('name_en', ''),
+                    'default_price': prod_data['default_price'],
+                    'pos_price': prod_data.get('pos_price', prod_data['default_price']),
+                    'category_id': prod_data.get('product_category_id'),
+                    'image_url': prod_data.get('image_url'),
+                    'is_active': prod_data.get('is_active', True),
+                    'barcode': barcode_val,
+                    'stock_qty': prod_data.get('stock_qty'),
+                    'is_scale_item': bool(prod_data.get('is_scale') or prod_data.get('is_scale_item') or prod_data.get('is_weight') or has_scale_plu or ('ชั่ง' in str(prod_data.get('name_th') or '')) or ('(กก' in str(prod_data.get('name_th') or '')) or str(prod_data.get('sku_code') or '').startswith(('800', '801')) or False),
+                    'is_promotion': bool(prod_data.get('is_promotion') or prod_data.get('is_flash_sale') or (prod_data.get('price_source') in ['promotion', 'flash_sale'])),
+                })
 
-                    id=prod_data['id'],
-
-                    sku_code=str(prod_data['sku_code']),
-
-                    name_th=prod_data['name_th'],
-
-                    name_en=prod_data.get('name_en', ''),
-
-                    default_price=prod_data['default_price'],
-
-                    pos_price=prod_data.get('pos_price', prod_data['default_price']),
-
-                    category_id=prod_data.get('product_category_id'),
-
-                    image_url=prod_data.get('image_url'),
-
-                    is_active=prod_data.get('is_active', True),
-
-                    barcode=barcode_val,
-
-                    stock_qty=prod_data.get('stock_qty'),
-
-                    is_scale_item=bool(prod_data.get('is_scale') or prod_data.get('is_scale_item') or prod_data.get('is_weight') or has_scale_plu or ('ชั่ง' in str(prod_data.get('name_th') or '')) or ('(กก' in str(prod_data.get('name_th') or '')) or str(prod_data.get('sku_code') or '').startswith(('800', '801')) or False),
-
-                    is_promotion=bool(prod_data.get('is_promotion') or prod_data.get('is_flash_sale') or (prod_data.get('price_source') in ['promotion', 'flash_sale']))
-
-                )
-
-                session.add(prod)
+            if product_rows:
+                session.bulk_insert_mappings(Product, product_rows)
+            if barcode_rows:
+                session.bulk_insert_mappings(ProductBarcode, barcode_rows)
 
             session.commit()
 

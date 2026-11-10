@@ -325,6 +325,8 @@ def get_engine(db_path=None):
         cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.execute("PRAGMA busy_timeout=10000")
         cursor.execute("PRAGMA cache_size=-16000")
+        cursor.execute("PRAGMA temp_store=MEMORY")
+        cursor.execute("PRAGMA mmap_size=268435456")
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
